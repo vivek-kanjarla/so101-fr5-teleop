@@ -59,6 +59,28 @@ class FR5Controller:
             raise IOError(f"GetActualJointPosDegree failed with error {err}")
         return list(joints)
 
+    def get_eef_pose(self) -> list[float]:
+        """Return [x_mm, y_mm, z_mm, rx_deg, ry_deg, rz_deg] — TCP pose in flange frame."""
+        with self._rpc_lock:
+            raw = self._robot.GetActualTCPPose(0)
+        if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+            raise IOError(f"GetActualTCPPose returned unexpected value: {raw!r}")
+        err, pose = raw
+        if err != 0:
+            raise IOError(f"GetActualTCPPose failed with error {err}")
+        return list(pose)
+
+    def get_joint_velocities(self) -> list[float]:
+        """Return [v1..v6] — actual joint velocities in deg/s."""
+        with self._rpc_lock:
+            raw = self._robot.GetActualJointSpeedsDegree(0)
+        if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+            raise IOError(f"GetActualJointSpeedsDegree returned unexpected value: {raw!r}")
+        err, vels = raw
+        if err != 0:
+            raise IOError(f"GetActualJointSpeedsDegree failed with error {err}")
+        return list(vels)
+
     def servo_j(self, joints_deg: list[float]):
         with self._rpc_lock:
             err = self._robot.ServoJ(

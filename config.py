@@ -92,3 +92,8 @@ SO101_GRIPPER_CLOSE_THRESHOLD = 0.35   # norm ≤ 0.35 → close
 
 # ── Data logging ──────────────────────────────────────────────────────────────
 LOG_DIR = "./episodes"
+
+# Write the task description here before pressing R to start recording.
+# One line, plain text. Stored in the episode metadata JSON alongside the CSV.
+# Example: "pick up the red block and place it in the bin"
+INSTRUCTION_FILE = "./episode_instruction.txt"

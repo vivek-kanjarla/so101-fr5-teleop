@@ -4,3 +4,5 @@ __pycache__/
 episodes/
 *.csv
 .env
+excalidraw.log
+episode_instruction.txt

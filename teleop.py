@@ -5,15 +5,18 @@ Controls:
   Space  — emergency stop (kills ServoJ, exits)
   R      — toggle recording on/off
   Ctrl-C — graceful exit
+
+Data logging:
+  Write the task description to episode_instruction.txt before pressing R.
+  Each episode saves a CSV (timestep data) + JSON (metadata) under ./episodes/.
 """
 
-import sys
 import time
 import threading
 
 from pynput import keyboard
 
-from config import LOOP_PERIOD, LOG_DIR, MAX_DELTA_DEG_PER_CYCLE
+from config import LOOP_PERIOD, LOG_DIR, MAX_DELTA_DEG_PER_CYCLE, INSTRUCTION_FILE
 from so101 import SO101Reader
 from fr5 import FR5Controller
 from mapper import so101_to_fr5
@@ -44,7 +47,9 @@ class TeleopSession:
                 print(f"[REC] Stopped — saved to {path}")
             else:
                 self._logger.start()
-                print(f"[REC] Recording started (episode {self._logger._episode_id})")
+                instr = self._logger._instruction
+                instr_str = f'  instruction: "{instr}"' if instr else f"  (no instruction — write to {INSTRUCTION_FILE} before pressing R)"
+                print(f"[REC] Recording started (episode {self._logger._episode_id})\n{instr_str}")
         elif hasattr(key, "char") and key.char in ("h", "H"):
             self._rehome_event.set()
 
@@ -52,6 +57,7 @@ class TeleopSession:
 
     def run(self):
         print("Connecting to hardware...")
+        print(f"  Tip: write task description to {INSTRUCTION_FILE} before pressing R.")
         with SO101Reader() as arm, FR5Controller() as robot:
             # Capture home poses — delta mapping means first command is always Δ=0
             so101_home        = arm.read_positions_deg()
@@ -108,7 +114,6 @@ class TeleopSession:
                         self._sing_level = level
 
                     if level == Level.DANGER:
-                        # Hold position — do not advance toward singularity
                         fr5_cmd = list(self._fr5_current)
                     else:
                         effective_limit = MAX_DELTA_DEG_PER_CYCLE * scale
@@ -120,7 +125,31 @@ class TeleopSession:
                     robot.servo_j(fr5_cmd)
                     self._fr5_current = fr5_cmd
 
-                    self._logger.log(time.time(), so101_pos, fr5_cmd)
+                    # ── read actual robot state for logging ───────────────────
+                    fr5_actual = fr5_eef = fr5_vel = None
+                    if self._logger.recording:
+                        try:
+                            fr5_actual = robot.get_joint_positions()
+                        except Exception:
+                            pass
+                        try:
+                            fr5_eef = robot.get_eef_pose()
+                        except Exception:
+                            pass
+                        try:
+                            fr5_vel = robot.get_joint_velocities()
+                        except Exception:
+                            pass
+
+                    gripper_norm = gripper_ctrl.get_normalized()
+
+                    self._logger.log(
+                        time.time(), so101_pos, fr5_cmd,
+                        fr5_actual=fr5_actual,
+                        fr5_eef=fr5_eef,
+                        gripper_norm=gripper_norm,
+                        fr5_vel=fr5_vel,
+                    )
 
                     elapsed = time.monotonic() - t0
                     sleep   = LOOP_PERIOD - elapsed

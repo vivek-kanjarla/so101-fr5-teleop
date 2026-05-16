@@ -47,6 +47,13 @@ class DHGripperController:
 
     # ── called from main loop ─────────────────────────────────────────────────
 
+    def get_normalized(self) -> float:
+        """Return SO-101 gripper position normalised to [0.0, 1.0]."""
+        with self._pos_lock:
+            pos = self._pos_deg
+        lo, hi = SO101_GRIPPER_RANGE
+        return max(0.0, min(1.0, (pos - lo) / (hi - lo)))
+
     def update_so101(self, raw_deg: float):
         with self._pos_lock:
             self._pos_deg = raw_deg
