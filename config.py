@@ -97,3 +97,10 @@ LOG_DIR = "./episodes"
 # One line, plain text. Stored in the episode metadata JSON alongside the CSV.
 # Example: "pick up the red block and place it in the bin"
 INSTRUCTION_FILE = "./episode_instruction.txt"
+
+# Read actual FR5 state (joint positions, EEF pose, velocities) once every N
+# ServoJ cycles. Each read takes ~2–3ms over XML-RPC; reading all three every
+# cycle at 125 Hz would exceed the 8ms loop budget. N=2 gives 62.5 Hz state
+# reads while keeping ServoJ at full 125 Hz. Every CSV row still gets complete
+# data because the logger caches and re-uses the last successful read.
+LOG_STATE_DOWNSAMPLE = 2

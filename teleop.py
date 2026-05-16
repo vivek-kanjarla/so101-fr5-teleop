@@ -16,7 +16,7 @@ import threading
 
 from pynput import keyboard
 
-from config import LOOP_PERIOD, LOG_DIR, MAX_DELTA_DEG_PER_CYCLE, INSTRUCTION_FILE
+from config import LOOP_PERIOD, LOG_DIR, MAX_DELTA_DEG_PER_CYCLE, INSTRUCTION_FILE, LOG_STATE_DOWNSAMPLE
 from so101 import SO101Reader
 from fr5 import FR5Controller
 from mapper import so101_to_fr5
@@ -33,6 +33,8 @@ class TeleopSession:
         self._logger       = EpisodeLogger()
         self._fr5_current  = [0.0] * 6
         self._sing_level   = Level.CLEAR
+        self._cycle        = 0
+        self._state_cache  = {"actual": None, "eef": None, "vel": None}
 
     # ── keyboard ──────────────────────────────────────────────────────────────
 
@@ -46,6 +48,7 @@ class TeleopSession:
                 path = self._logger.stop()
                 print(f"[REC] Stopped — saved to {path}")
             else:
+                self._state_cache = {"actual": None, "eef": None, "vel": None}
                 self._logger.start()
                 instr = self._logger._instruction
                 instr_str = f'  instruction: "{instr}"' if instr else f"  (no instruction — write to {INSTRUCTION_FILE} before pressing R)"
@@ -122,33 +125,37 @@ class TeleopSession:
                             self._fr5_current, delta_limit=effective_limit
                         )
 
+                    log_time = time.time()   # capture before servo_j for accurate timestamp
                     robot.servo_j(fr5_cmd)
                     self._fr5_current = fr5_cmd
+                    self._cycle += 1
 
                     # ── read actual robot state for logging ───────────────────
-                    fr5_actual = fr5_eef = fr5_vel = None
-                    if self._logger.recording:
+                    # Reads happen every LOG_STATE_DOWNSAMPLE cycles so the
+                    # ~6–9ms RPC overhead doesn't blow the 8ms ServoJ budget.
+                    # Cached values fill in the off cycles — every row is complete.
+                    if self._logger.recording and self._cycle % LOG_STATE_DOWNSAMPLE == 0:
                         try:
-                            fr5_actual = robot.get_joint_positions()
+                            self._state_cache["actual"] = robot.get_joint_positions()
                         except Exception:
                             pass
                         try:
-                            fr5_eef = robot.get_eef_pose()
+                            self._state_cache["eef"] = robot.get_eef_pose()
                         except Exception:
                             pass
                         try:
-                            fr5_vel = robot.get_joint_velocities()
+                            self._state_cache["vel"] = robot.get_joint_velocities()
                         except Exception:
                             pass
 
                     gripper_norm = gripper_ctrl.get_normalized()
 
                     self._logger.log(
-                        time.time(), so101_pos, fr5_cmd,
-                        fr5_actual=fr5_actual,
-                        fr5_eef=fr5_eef,
+                        log_time, so101_pos, fr5_cmd,
+                        fr5_actual=self._state_cache["actual"],
+                        fr5_eef=self._state_cache["eef"],
                         gripper_norm=gripper_norm,
-                        fr5_vel=fr5_vel,
+                        fr5_vel=self._state_cache["vel"],
                     )
 
                     elapsed = time.monotonic() - t0

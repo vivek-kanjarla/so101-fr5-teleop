@@ -27,7 +27,7 @@ from config import LOG_DIR, INSTRUCTION_FILE
 class EpisodeLogger:
     def __init__(self):
         self._rows: list[dict] = []
-        self._episode_id = int(time.time())
+        self._episode_id = int(time.time() * 1000)
         self._start_time: float = 0.0
         self._instruction: str = ""
         self._recording = False
@@ -38,7 +38,7 @@ class EpisodeLogger:
 
     def start(self):
         self._rows = []
-        self._episode_id = int(time.time())
+        self._episode_id = int(time.time() * 1000)
         self._start_time = time.time()
         self._instruction = self._read_instruction()
         self._recording = True
@@ -98,7 +98,7 @@ class EpisodeLogger:
         try:
             with open(INSTRUCTION_FILE) as f:
                 return f.read().strip()
-        except FileNotFoundError:
+        except Exception:
             return ""
 
     def _flush(self) -> str:

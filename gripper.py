@@ -36,6 +36,7 @@ class DHGripperController:
         self._state     = None      # "open" | "closed" | None
 
         self._pos_deg   = 0.0
+        self._pos_valid = False   # True after first successful read_gripper_deg
         self._pos_lock  = threading.Lock()
 
         # Handshake events
@@ -47,16 +48,19 @@ class DHGripperController:
 
     # ── called from main loop ─────────────────────────────────────────────────
 
-    def get_normalized(self) -> float:
-        """Return SO-101 gripper position normalised to [0.0, 1.0]."""
+    def get_normalized(self) -> float | None:
+        """Return SO-101 gripper position normalised to [0.0, 1.0], or None if not yet read."""
         with self._pos_lock:
+            if not self._pos_valid:
+                return None
             pos = self._pos_deg
         lo, hi = SO101_GRIPPER_RANGE
         return max(0.0, min(1.0, (pos - lo) / (hi - lo)))
 
     def update_so101(self, raw_deg: float):
         with self._pos_lock:
-            self._pos_deg = raw_deg
+            self._pos_deg   = raw_deg
+            self._pos_valid = True
 
     def wants_pause(self) -> bool:
         """True when gripper thread is waiting for ServoJ to pause."""
@@ -120,7 +124,12 @@ class DHGripperController:
             t0 = time.monotonic()
 
             with self._pos_lock:
-                pos = self._pos_deg
+                pos   = self._pos_deg
+                valid = self._pos_valid
+
+            if not valid:
+                self._stop_evt.wait(timeout=1.0 / self.POLL_HZ)
+                continue
 
             lo, hi = SO101_GRIPPER_RANGE
             norm = max(0.0, min(1.0, (pos - lo) / (hi - lo)))
