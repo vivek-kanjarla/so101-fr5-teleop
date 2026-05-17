@@ -18,9 +18,11 @@ class FR5Controller:
 
     def connect(self):
         self._robot = Robot.RPC(FR5_IP)
-        if not Robot.RPC.is_connect:
-            print("  [FR5] CNDE unavailable — running on XML-RPC only (fully functional)")
-            Robot.RPC.is_connect = True
+        try:
+            if not Robot.RPC.is_conect:
+                Robot.RPC.is_conect = True
+        except AttributeError:
+            pass  # attribute set by SDK after first CNDE handshake; safe to ignore
 
         self._robot.StopMove()
         self._robot.ResetAllError()

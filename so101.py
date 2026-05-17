@@ -7,6 +7,7 @@ from config import SO101_PORT, SO101_BAUDRATE, SO101_MOTORS, SO101_GRIPPER_ID
 
 PROTOCOL_VERSION = 0
 ADDR_PRESENT_POSITION = 56  # STS3215 register: present position (2 bytes)
+ADDR_TORQUE_ENABLE    = 40  # STS3215 register: torque enable (1 byte, 0=off 1=on)
 
 
 class SO101Reader:
@@ -21,6 +22,10 @@ class SO101Reader:
             raise RuntimeError(f"Cannot open port {SO101_PORT}")
         if not self._port.setBaudRate(SO101_BAUDRATE):
             raise RuntimeError(f"Cannot set baud rate {SO101_BAUDRATE}")
+        # Leader arm must move freely — disable torque on all motors so the
+        # servos stop fighting the human and we only read encoder positions.
+        for mid in self._motor_ids + [SO101_GRIPPER_ID]:
+            self._packet.write1ByteTxRx(self._port, mid, ADDR_TORQUE_ENABLE, 0)
 
     def close(self):
         self._port.closePort()
