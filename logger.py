@@ -143,9 +143,6 @@ class EpisodeLogger:
         timestamps = np.array([ts for ts, _ in frames], dtype=np.float64)
         np.save(f"{base}_camera_ts.npy", timestamps)
 
-        # Video plays back at nominal CAMERA_FPS — real timing is in the .npy
-        # sidecar. Slight drift between the two is expected and handled at
-        # training time by resampling against the timestamps.
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         path   = f"{base}_camera.mp4"
         writer = cv2.VideoWriter(
@@ -154,6 +151,19 @@ class EpisodeLogger:
         if not writer.isOpened():
             print(f"[LOGGER] Could not open video writer for {path} — skipping MP4.")
             return
+
+        written = 0
         for _, frame in frames:
+            # Ensure frame is a contiguous uint8 BGR array before writing —
+            # VideoWriter silently skips frames with wrong dtype or layout.
+            if not isinstance(frame, np.ndarray):
+                continue
+            if frame.dtype != np.uint8:
+                frame = frame.astype(np.uint8)
+            if not frame.flags['C_CONTIGUOUS']:
+                frame = np.ascontiguousarray(frame)
             writer.write(frame)
+            written += 1
+
         writer.release()
+        print(f"[LOGGER] Video saved: {written}/{len(frames)} frames → {path}")
