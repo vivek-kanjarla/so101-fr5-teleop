@@ -61,7 +61,7 @@ Occasional readings like `2880°`, `2891°` for a joint that should be near `0°
 if raw > 32767:
     raw -= 65536
 ```
-**Status:** Not yet fixed. Workaround: keep joints away from the mechanical zero crossing during teleoperation.
+**Status:** Fixed — `_signed()` helper in `so101.py` interprets the raw value as signed 16-bit before converting to degrees.
 
 ---
 
@@ -83,6 +83,8 @@ MAX_DELTA_PER_JOINT = [0.16, 0.12, 0.12, 0.30, 0.08, 0.20]
 #                      20/s  15/s  15/s  37/s  10/s 25°/s
 ```
 Also consider raising `FR5_SERVO_VEL` from `2` to `5` for more responsive motion.
+
+**Status:** Fixed — `MAX_DELTA_PER_JOINT` doubled, `FR5_SERVO_VEL` raised to `5`, `FR5_FILTER_T` reduced to `0.08`.
 
 ---
 

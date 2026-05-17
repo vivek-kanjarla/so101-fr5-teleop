@@ -10,6 +10,14 @@ ADDR_PRESENT_POSITION = 56  # STS3215 register: present position (2 bytes)
 ADDR_TORQUE_ENABLE    = 40  # STS3215 register: torque enable (1 byte, 0=off 1=on)
 
 
+def _signed(raw: int) -> int:
+    """Convert unsigned 16-bit encoder read to signed (-32768..32767).
+    STS3215 uses signed representation when crossing the zero position;
+    without this, motors near zero read as ~2880° instead of ~0°.
+    """
+    return raw if raw < 32768 else raw - 65536
+
+
 class SO101Reader:
     def __init__(self):
         self._port    = PortHandler(SO101_PORT)
@@ -39,7 +47,7 @@ class SO101Reader:
             )
             if result != COMM_SUCCESS:
                 raise IOError(f"Motor {mid} ({name}) read failed")
-            positions[name] = (raw / 4096.0) * 360.0
+            positions[name] = (_signed(raw) / 4096.0) * 360.0
         return positions
 
     def read_gripper_deg(self) -> float:
@@ -49,7 +57,7 @@ class SO101Reader:
         )
         if result != COMM_SUCCESS:
             raise IOError(f"Gripper motor {SO101_GRIPPER_ID} read failed")
-        return (raw / 4096.0) * 360.0
+        return (_signed(raw) / 4096.0) * 360.0
 
     def __enter__(self):
         self.open()

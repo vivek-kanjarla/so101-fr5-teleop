@@ -50,16 +50,16 @@ JOINT_AMP = [1.5, 2.0, 2.0, 3.0, 1.5]
 
 # ── Safety ────────────────────────────────────────────────────────────────────
 # Global fallback — used when per-joint limit not specified
-MAX_DELTA_DEG_PER_CYCLE = 0.04    # 0.04 × 125Hz = 5°/s
+MAX_DELTA_DEG_PER_CYCLE = 0.08    # 0.08 × 125Hz = 10°/s
 
 # Per-joint rate limits (degrees/cycle) for [J1, J2, J3, J4, J5, J6]
 # Wrist joints (J4, J6) can move faster — less inertia, less risk
-MAX_DELTA_PER_JOINT = [0.08, 0.06, 0.06, 0.20, 0.04, 0.10]
+MAX_DELTA_PER_JOINT = [0.16, 0.12, 0.12, 0.30, 0.08, 0.20]
 #                       J1     J2     J3     J4    J5    J6
-#                       10°/s  7.5°/s 7.5°/s 25°/s --  12.5°/s
+#                       20°/s  15°/s  15°/s  37/s  10/s  25°/s
 
-FR5_SERVO_VEL           = 2       # ServoJ velocity % — start low, tune up
-FR5_FILTER_T            = 0.12    # ServoJ trajectory filter (seconds) — smooths between commands
+FR5_SERVO_VEL           = 5       # ServoJ velocity % — start low, tune up
+FR5_FILTER_T            = 0.08    # ServoJ trajectory filter (seconds) — smooths between commands
 
 # From GetJointSoftLimitDeg() on this controller, with 5° margin inside each limit.
 FR5_JOINT_LIMITS = [
