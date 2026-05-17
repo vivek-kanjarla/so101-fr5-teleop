@@ -18,11 +18,7 @@ class FR5Controller:
 
     def connect(self):
         self._robot = Robot.RPC(FR5_IP)
-        try:
-            if not Robot.RPC.is_conect:
-                Robot.RPC.is_conect = True
-        except AttributeError:
-            pass  # attribute set by SDK after first CNDE handshake; safe to ignore
+        Robot.RPC.is_conect = True   # force XML-RPC mode; writing never raises AttributeError
 
         self._robot.StopMove()
         self._robot.ResetAllError()
