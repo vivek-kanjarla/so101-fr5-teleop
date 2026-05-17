@@ -73,6 +73,27 @@ class FR5Controller:
             raise IOError(f"GetActualTCPPose failed with error {err}")
         return list(pose)
 
+    def get_inverse_kin(self, eef_pose: list[float], ref_joints: list[float]) -> list[float]:
+        """
+        Compute inverse kinematics for a target TCP pose.
+
+        eef_pose   — [x_mm, y_mm, z_mm, rx_deg, ry_deg, rz_deg]
+        ref_joints — reference joint angles (deg) used to select the nearest IK solution
+
+        Returns list of 6 joint angles in degrees, or raises IOError on failure.
+        """
+        eef_pose   = [float(v) for v in eef_pose]
+        ref_joints = [float(v) for v in ref_joints]
+        with self._rpc_lock:
+            # type=0: use ref_joints to pick the solution closest to current pose
+            raw = self._robot.GetInverseKin(0, eef_pose, ref_joints)
+        if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+            raise IOError(f"GetInverseKin returned unexpected value: {raw!r}")
+        err, joints = raw
+        if err != 0:
+            raise IOError(f"GetInverseKin failed with error {err} (target pose may be unreachable)")
+        return [float(j) for j in joints]
+
     def get_joint_velocities(self) -> list[float]:
         """Return [v1..v6] — actual joint velocities in deg/s."""
         with self._rpc_lock:

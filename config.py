@@ -90,6 +90,49 @@ SO101_GRIPPER_RANGE        = (2028/4096*360, 3236/4096*360)  # (178.0°, 284.3°
 SO101_GRIPPER_OPEN_THRESHOLD  = 0.65   # norm ≥ 0.65 → open
 SO101_GRIPPER_CLOSE_THRESHOLD = 0.35   # norm ≤ 0.35 → close
 
+# ── Meta Quest 3 VR controller ───────────────────────────────────────────────
+#
+# Two transport modes:
+#   "oculus_reader" — Oculus Reader APK (rail-berkeley/oculus_reader) via ADB
+#                     Run: adb forward tcp:5555 tcp:5555
+#   "udp"           — lightweight UDP packet streamer (custom app / HTS-compatible)
+#
+QUEST3_MODE       = "oculus_reader"  # "oculus_reader" | "udp"
+QUEST3_ADB_PORT   = 5555             # TCP port after adb forward (oculus_reader mode)
+QUEST3_UDP_PORT   = 5005             # UDP port this PC listens on (udp mode)
+QUEST3_ACTIVE_HAND = "right"         # which controller drives the arm: "right" | "left"
+
+# Position scale: 1 meter of controller motion → this many mm of EEF motion.
+# Start conservative (300) and increase once the motion feels right.
+VR_POSITION_SCALE = 300.0    # mm / m
+
+# Rotation scale: multiplier on controller rotation → EEF rotation (deg).
+# 1.0 = 1:1 mapping. Reduce if wrist snaps feel aggressive.
+VR_ROTATION_SCALE = 0.8
+
+# Per-cycle safety clamps applied BEFORE IK
+VR_MAX_DELTA_POS_MM  = 8.0    # max EEF translation per cycle (mm)
+VR_MAX_DELTA_ROT_DEG = 3.0    # max EEF rotation per cycle (deg, per axis)
+
+# Coordinate frame rotation: Quest 3 OpenXR convention → FR5 TCP frame.
+# Each entry is (axis, angle_deg) applied in order — default maps
+# Quest (X=right, Y=up, Z=back) → FR5 TCP (X=fwd, Y=left, Z=up).
+# Tune this if EEF motion axes feel wrong on your setup.
+# Format: list of [source_axis_index, target_axis_index, sign]
+# Stored as a 3×3 matrix (row = FR5 axis, col = Quest axis):
+#   FR5_X ← -Quest_Z  (Quest backward  → FR5 forward inverted)
+#   FR5_Y ←  Quest_X  (Quest right     → FR5 right)
+#   FR5_Z ←  Quest_Y  (Quest up        → FR5 up)
+VR_FRAME_ROTATION = [
+    [ 0.0, 0.0, -1.0],   # FR5 X
+    [ 1.0, 0.0,  0.0],   # FR5 Y
+    [ 0.0, 1.0,  0.0],   # FR5 Z
+]
+
+# Gripper control via Quest trigger (analog, 0=released → 1=fully pulled)
+VR_GRIPPER_OPEN_THRESHOLD  = 0.2   # trigger below this → open
+VR_GRIPPER_CLOSE_THRESHOLD = 0.7   # trigger above this → close
+
 # ── D405 RealSense wrist camera ───────────────────────────────────────────────
 CAMERA_WIDTH  = 640
 CAMERA_HEIGHT = 480
