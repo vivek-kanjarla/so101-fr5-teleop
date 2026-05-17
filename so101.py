@@ -40,6 +40,7 @@ class SO101Reader:
 
     def read_positions_deg(self) -> dict[str, float]:
         """Return {joint_name: degrees} for all configured motors."""
+        self._port.clearPort()  # discard any stale bytes left by a previous gripper read
         positions = {}
         for name, mid in zip(self._names, self._motor_ids):
             raw, result, _ = self._packet.read2ByteTxRx(
