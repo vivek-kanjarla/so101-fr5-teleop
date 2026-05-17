@@ -3,6 +3,8 @@ __pycache__/
 *.pyo
 episodes/
 *.csv
+*.mp4
+*.npy
 .env
 excalidraw.log
 episode_instruction.txt

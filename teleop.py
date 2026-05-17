@@ -23,6 +23,7 @@ from mapper import so101_to_fr5
 from logger import EpisodeLogger
 from singularity import check as singularity_check, Level
 from gripper import DHGripperController
+from camera import D405Camera
 
 
 class TeleopSession:
@@ -61,6 +62,15 @@ class TeleopSession:
     def run(self):
         print("Connecting to hardware...")
         print(f"  Tip: write task description to {INSTRUCTION_FILE} before pressing R.")
+
+        camera = D405Camera()
+        try:
+            camera.start()
+            self._logger.set_camera(camera)
+        except Exception as exc:
+            print(f"[CAMERA] Could not start D405 ({exc}) — continuing without camera.")
+            camera = None
+
         with SO101Reader() as arm, FR5Controller() as robot:
             # Capture home poses — delta mapping means first command is always Δ=0
             so101_home        = arm.read_positions_deg()
@@ -173,6 +183,9 @@ class TeleopSession:
                     path = self._logger.stop()
                     if path:
                         print(f"[REC] Auto-saved episode to {path}")
+
+        if camera:
+            camera.stop()
 
         if self._estop:
             print("[E-STOP] Motion halted. Check robot state before restarting.")
