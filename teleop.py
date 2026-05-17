@@ -154,22 +154,28 @@ class TeleopSession:
                         self._cycle += 1
 
                         # ── read actual robot state for logging ───────────────
-                        # Reads happen every LOG_STATE_DOWNSAMPLE cycles so the
-                        # ~6–9ms RPC overhead doesn't blow the 8ms ServoJ budget.
-                        # Cached values fill the off cycles — every row complete.
+                        # Stagger the three reads across consecutive qualifying
+                        # cycles — one RPC call per cycle (~3 ms) instead of all
+                        # three at once (~9 ms). Doing all three in the same cycle
+                        # pushed it to ~14 ms, exceeding the 8 ms ServoJ budget
+                        # and causing the FR5 to halt whenever recording started.
                         if self._logger.recording and self._cycle % LOG_STATE_DOWNSAMPLE == 0:
-                            try:
-                                self._state_cache["actual"] = robot.get_joint_positions()
-                            except Exception:
-                                pass
-                            try:
-                                self._state_cache["eef"] = robot.get_eef_pose()
-                            except Exception:
-                                pass
-                            try:
-                                self._state_cache["vel"] = robot.get_joint_velocities()
-                            except Exception:
-                                pass
+                            slot = (self._cycle // LOG_STATE_DOWNSAMPLE) % 3
+                            if slot == 0:
+                                try:
+                                    self._state_cache["actual"] = robot.get_joint_positions()
+                                except Exception:
+                                    pass
+                            elif slot == 1:
+                                try:
+                                    self._state_cache["eef"] = robot.get_eef_pose()
+                                except Exception:
+                                    pass
+                            else:
+                                try:
+                                    self._state_cache["vel"] = robot.get_joint_velocities()
+                                except Exception:
+                                    pass
 
                         gripper_norm = gripper_ctrl.get_normalized()
 

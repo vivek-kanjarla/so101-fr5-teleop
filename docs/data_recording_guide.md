@@ -115,7 +115,7 @@ One row per control cycle at 125 Hz. Columns:
 | `gripper_norm` | float | SO-101 gripper [0.0=closed, 1.0=open] |
 | `fr5_vel_j1` .. `fr5_vel_j6` | float | Actual FR5 joint velocities (deg/s) |
 
-Actual FR5 state is read at 62.5 Hz (every 2 cycles) and cached — every row has complete data even on off-cycles.
+Actual FR5 state is read at ~21 Hz per quantity (positions, EEF, velocities are staggered one per qualifying cycle and cached) — every row has complete data.
 
 ### `episode_{id}.json`
 

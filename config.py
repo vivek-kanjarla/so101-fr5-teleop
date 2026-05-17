@@ -103,9 +103,10 @@ LOG_DIR = "./episodes"
 # Example: "pick up the red block and place it in the bin"
 INSTRUCTION_FILE = "./episode_instruction.txt"
 
-# Read actual FR5 state (joint positions, EEF pose, velocities) once every N
-# ServoJ cycles. Each read takes ~2–3ms over XML-RPC; reading all three every
-# cycle at 125 Hz would exceed the 8ms loop budget. N=2 gives 62.5 Hz state
-# reads while keeping ServoJ at full 125 Hz. Every CSV row still gets complete
-# data because the logger caches and re-uses the last successful read.
+# State reads are staggered: each qualifying cycle reads ONE of {joint positions,
+# EEF pose, joint velocities} in rotation. LOG_STATE_DOWNSAMPLE controls how
+# often a qualifying cycle occurs — e.g., N=2 means one read every 2 cycles,
+# cycling through all three properties every 6 cycles (~21 Hz per property).
+# This caps per-cycle overhead at one RPC call (~3 ms) and keeps the 8 ms
+# ServoJ budget intact. Every CSV row still gets complete data via caching.
 LOG_STATE_DOWNSAMPLE = 2
