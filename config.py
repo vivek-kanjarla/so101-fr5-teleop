@@ -57,10 +57,17 @@ GRIPPER_CLOSE_THRESHOLD = 0.7   # trigger above this → close
 #                     Run: adb forward tcp:5555 tcp:5555
 #   "udp"           — lightweight UDP packet streamer (custom app / HTS-compatible)
 #
-QUEST3_MODE        = "oculus_reader"  # "oculus_reader" | "udp"
+QUEST3_MODE        = "oculus_reader"  # "oculus_reader" | "vuer" | "udp"
 QUEST3_ADB_PORT    = 5555             # TCP port after adb forward (oculus_reader mode)
 QUEST3_UDP_PORT    = 5005             # UDP port this PC listens on (udp mode)
 QUEST3_ACTIVE_HAND = "right"          # which controller drives the arm: "right" | "left"
+
+# Vuer transport (QUEST3_MODE = "vuer") — Quest 3 browser → HTTPS WebXR server
+# Generate cert once: openssl req -x509 -newkey rsa:4096 -nodes \
+#   -out ssl/cert.pem -keyout ssl/key.pem -days 365 -subj "/CN=quest-teleop"
+QUEST3_VUER_PORT   = 8012             # HTTPS port the Quest browser connects to
+QUEST3_VUER_CERT   = "./ssl/cert.pem" # path to SSL certificate
+QUEST3_VUER_KEY    = "./ssl/key.pem"  # path to SSL private key
 
 # Position scale: 1 metre of controller motion → this many mm of EEF motion.
 # Start conservative (300) and increase once the motion feels right.
