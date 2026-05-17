@@ -1,5 +1,5 @@
 """
-logger.py — saves teleoperation episodes to CSV + JSON metadata.
+logger.py — saves teleoperation episodes to CSV + JSON metadata + MP4 video.
 
 Per-timestep columns logged:
   timestamp                    — wall-clock float64 (seconds)
@@ -11,17 +11,21 @@ Per-timestep columns logged:
   gripper_norm                 — SO-101 gripper normalised [0.0, 1.0]
   fr5_vel_j[1..6]             — FR5 actual joint velocities (deg/s)
 
-Episode metadata (JSON sidecar):
-  episode_id, start_time, language_instruction, num_steps, duration_s
+Per-episode files:
+  episode_{id}.csv             — timestep data (above)
+  episode_{id}.json            — metadata + camera intrinsics
+  episode_{id}_camera.mp4      — RGB video at CAMERA_FPS (if camera attached)
+  episode_{id}_camera_ts.npy   — per-frame timestamps as float64 array
 """
 
 import json
 import os
 import time
 
+import numpy as np
 import pandas as pd
 
-from config import LOG_DIR, INSTRUCTION_FILE
+from config import LOG_DIR, INSTRUCTION_FILE, CAMERA_FPS, CAMERA_WIDTH, CAMERA_HEIGHT
 
 
 class EpisodeLogger:
@@ -31,10 +35,15 @@ class EpisodeLogger:
         self._start_time: float = 0.0
         self._instruction: str = ""
         self._recording = False
+        self._camera = None   # optional D405Camera reference
 
     @property
     def recording(self) -> bool:
         return self._recording
+
+    def set_camera(self, camera) -> None:
+        """Attach a D405Camera instance. Call before the teleop loop starts."""
+        self._camera = camera
 
     def start(self):
         self._rows = []
@@ -42,13 +51,16 @@ class EpisodeLogger:
         self._start_time = time.time()
         self._instruction = self._read_instruction()
         self._recording = True
+        if self._camera:
+            self._camera.start_recording()
 
     def stop(self) -> str | None:
         """Stop recording and flush to disk. Returns CSV path or None."""
         self._recording = False
+        frames = self._camera.stop_recording() if self._camera else []
         if not self._rows:
             return None
-        return self._flush()
+        return self._flush(frames)
 
     def log(
         self,
@@ -101,7 +113,7 @@ class EpisodeLogger:
         except Exception:
             return ""
 
-    def _flush(self) -> str:
+    def _flush(self, frames: list) -> str:
         os.makedirs(LOG_DIR, exist_ok=True)
         base = os.path.join(LOG_DIR, f"episode_{self._episode_id}")
 
@@ -114,8 +126,34 @@ class EpisodeLogger:
             "language_instruction": self._instruction,
             "num_steps":            len(self._rows),
             "duration_s":           round(duration, 3),
+            "camera_intrinsics":    self._camera.intrinsics if self._camera else None,
+            "camera_num_frames":    len(frames),
         }
         with open(f"{base}.json", "w") as f:
             json.dump(meta, f, indent=2)
 
+        if frames:
+            self._save_video(base, frames)
+
         return f"{base}.csv"
+
+    def _save_video(self, base: str, frames: list) -> None:
+        import cv2
+
+        timestamps = np.array([ts for ts, _ in frames], dtype=np.float64)
+        np.save(f"{base}_camera_ts.npy", timestamps)
+
+        # Video plays back at nominal CAMERA_FPS — real timing is in the .npy
+        # sidecar. Slight drift between the two is expected and handled at
+        # training time by resampling against the timestamps.
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        path   = f"{base}_camera.mp4"
+        writer = cv2.VideoWriter(
+            path, fourcc, CAMERA_FPS, (CAMERA_WIDTH, CAMERA_HEIGHT),
+        )
+        if not writer.isOpened():
+            print(f"[LOGGER] Could not open video writer for {path} — skipping MP4.")
+            return
+        for _, frame in frames:
+            writer.write(frame)
+        writer.release()

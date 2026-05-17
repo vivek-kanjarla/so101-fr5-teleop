@@ -90,6 +90,11 @@ SO101_GRIPPER_RANGE        = (2028/4096*360, 3236/4096*360)  # (178.0°, 284.3°
 SO101_GRIPPER_OPEN_THRESHOLD  = 0.65   # norm ≥ 0.65 → open
 SO101_GRIPPER_CLOSE_THRESHOLD = 0.35   # norm ≤ 0.35 → close
 
+# ── D405 RealSense wrist camera ───────────────────────────────────────────────
+CAMERA_WIDTH  = 640
+CAMERA_HEIGHT = 480
+CAMERA_FPS    = 30    # 30 / 60 / 90 supported by D405; 30 is standard for training data
+
 # ── Data logging ──────────────────────────────────────────────────────────────
 LOG_DIR = "./episodes"
 
