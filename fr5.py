@@ -25,6 +25,7 @@ class FR5Controller:
         time.sleep(0.3)
         self._robot.Mode(0)
         self._robot.RobotEnable(1)
+        time.sleep(0.5)   # servo drives need ~500 ms to fully energise after enable
 
     def start_servo_mode(self):
         time.sleep(0.1)
@@ -39,6 +40,10 @@ class FR5Controller:
                 self._robot.ServoMoveEnd()
         except Exception:
             pass
+
+    def reset_errors(self):
+        with self._rpc_lock:
+            self._robot.ResetAllError()
 
     def disconnect(self):
         self.stop_servo_mode()

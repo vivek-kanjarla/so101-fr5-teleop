@@ -47,6 +47,7 @@ class TeleopSession:
         self._sing_level   = Level.CLEAR
         self._cycle        = 0
         self._comm_errors  = 0
+        self._consec_errors = 0   # resets to 0 on every successful servo_j
         self._state_cache  = {"actual": None, "eef": None, "vel": None}
 
     # ── keyboard ──────────────────────────────────────────────────────────────
@@ -152,6 +153,7 @@ class TeleopSession:
                         robot.servo_j(fr5_cmd)
                         self._fr5_current = fr5_cmd
                         self._cycle += 1
+                        self._consec_errors = 0   # servo_j succeeded
 
                         # ── read actual robot state for logging ───────────────
                         # Stagger the three reads across consecutive qualifying
@@ -204,8 +206,27 @@ class TeleopSession:
                         # cycle and retry. Persistent faults surface in the
                         # throttled log and the heartbeat error counter.
                         self._comm_errors += 1
+                        self._consec_errors += 1
                         if self._comm_errors == 1 or self._comm_errors % 50 == 0:
                             print(f"[WARN] cycle skipped (error #{self._comm_errors}): {exc!r}")
+
+                        # After 20 consecutive failures the FR5 has almost certainly
+                        # exited ServoJ mode (timing fault, robot fault, or network
+                        # hiccup). Stop → clear errors → re-enter servo mode so the
+                        # session can recover without a restart.
+                        if self._consec_errors % 20 == 0:
+                            print(f"[RECOVER] {self._consec_errors} consecutive errors — "
+                                  "resetting servo mode...")
+                            try:
+                                robot.stop_servo_mode()
+                                time.sleep(0.15)
+                                robot.reset_errors()
+                                time.sleep(0.05)
+                                robot.start_servo_mode()
+                                print("[RECOVER] Servo mode restored — resuming teleop.")
+                            except Exception as exc2:
+                                print(f"[RECOVER] Could not restore servo mode: {exc2!r}")
+
                         time.sleep(LOOP_PERIOD)
                         continue
 
