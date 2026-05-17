@@ -1,67 +1,16 @@
 """
-check_hardware.py — verify SO-101 and FR5 hardware connectivity.
+check_hardware.py — verify FR5 and D405 camera hardware for VR teleop.
 Run with: python check_hardware.py
 """
 
 import sys
-from config import FR5_IP, SO101_PORT, SO101_BAUDRATE, SO101_MOTORS, SO101_GRIPPER_ID
 
-
-# ── SO-101 ────────────────────────────────────────────────────────────────────
-
-def check_so101():
-    print("=" * 55)
-    print("  SO-101 Leader Arm (USB Serial / Feetech STS3215)")
-    print("=" * 55)
-
-    try:
-        from scservo_sdk import PortHandler, PacketHandler, COMM_SUCCESS
-    except ImportError:
-        print("  FAIL  Could not import scservo_sdk — run: pip install scservo-sdk")
-        return False
-
-    port    = PortHandler(SO101_PORT)
-    packet  = PacketHandler(0)   # protocol 0 for STS3215
-
-    if not port.openPort():
-        print(f"  FAIL  Could not open {SO101_PORT}")
-        print("         Check: Is the USB cable plugged in?")
-        print("                Run: ls /dev/ttyACM*  to confirm the port exists")
-        print("                Run: groups $USER     to confirm you're in dialout")
-        return False
-    ok_port = True
-    print(f"  PASS  Opened {SO101_PORT} at {SO101_BAUDRATE} baud")
-
-    if not port.setBaudRate(SO101_BAUDRATE):
-        print(f"  FAIL  Could not set baud rate {SO101_BAUDRATE}")
-        port.closePort()
-        return False
-
-    ADDR_PRESENT_POSITION = 56
-    ADDR_TORQUE_ENABLE    = 40
-
-    all_ok = True
-    for name, mid in list(SO101_MOTORS.items()) + [("gripper", SO101_GRIPPER_ID)]:
-        # Disable torque so arm hangs free (same as teleop)
-        packet.write1ByteTxRx(port, mid, ADDR_TORQUE_ENABLE, 0)
-
-        raw, result, _ = packet.read2ByteTxRx(port, mid, ADDR_PRESENT_POSITION)
-        if result == COMM_SUCCESS:
-            signed = raw if raw < 32768 else raw - 65536
-            deg    = (signed / 4096.0) * 360.0
-            print(f"  PASS  motor {mid:2d}  ({name:<14s})  pos = {deg:8.2f}°")
-        else:
-            print(f"  FAIL  motor {mid:2d}  ({name:<14s})  read failed (result={result})")
-            all_ok = False
-
-    port.closePort()
-    return all_ok
+from config import FR5_IP
 
 
 # ── FR5 ───────────────────────────────────────────────────────────────────────
 
 def check_fr5():
-    print()
     print("=" * 55)
     print("  FR5 Follower Cobot (Ethernet / Fairino SDK)")
     print("=" * 55)
@@ -131,23 +80,75 @@ def check_fr5():
     return all_ok
 
 
+# ── D405 Camera ───────────────────────────────────────────────────────────────
+
+def check_camera():
+    print()
+    print("=" * 55)
+    print("  Intel RealSense D405 (USB 3.0 wrist camera)")
+    print("=" * 55)
+
+    try:
+        import pyrealsense2 as rs
+    except ImportError:
+        print("  FAIL  Could not import pyrealsense2")
+        print("         Run linux_setup.sh or: sudo apt-get install librealsense2-dev")
+        print("         Then: pip install pyrealsense2")
+        return False
+
+    ctx = rs.context()
+    devices = ctx.query_devices()
+    if len(devices) == 0:
+        print("  FAIL  No RealSense devices found")
+        print("         Is the D405 plugged into a USB 3.0 port?")
+        print("         Run: lsusb | grep Intel  — to check USB enumeration")
+        print("         Run linux_setup.sh to install udev rules if needed.")
+        return False
+
+    for dev in devices:
+        name   = dev.get_info(rs.camera_info.name)
+        serial = dev.get_info(rs.camera_info.serial_number)
+        fw     = dev.get_info(rs.camera_info.firmware_version)
+        print(f"  PASS  {name}  serial={serial}  fw={fw}")
+
+    # Quick pipeline test — open, grab one frame, close
+    try:
+        cfg      = rs.config()
+        cfg.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+        pipeline = rs.pipeline()
+        profile  = pipeline.start(cfg)
+        frames   = pipeline.wait_for_frames(timeout_ms=3000)
+        color    = frames.get_color_frame()
+        pipeline.stop()
+        if color:
+            print(f"  PASS  Color stream 640×480@30 — got frame {color.get_frame_number()}")
+        else:
+            print("  WARN  Pipeline started but no color frame received")
+    except Exception as exc:
+        print(f"  FAIL  Pipeline test failed: {exc}")
+        print("         Try unplugging and replugging the USB cable.")
+        return False
+
+    return True
+
+
 # ── entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    so101_ok = check_so101()
-    fr5_ok   = check_fr5()
+    fr5_ok    = check_fr5()
+    camera_ok = check_camera()
 
     print()
     print("=" * 55)
     print("  Summary")
     print("=" * 55)
-    print(f"  SO-101  : {'PASS' if so101_ok else 'FAIL'}")
-    print(f"  FR5     : {'PASS' if fr5_ok   else 'FAIL'}")
+    print(f"  FR5     : {'PASS' if fr5_ok    else 'FAIL'}")
+    print(f"  D405    : {'PASS' if camera_ok else 'FAIL'}")
     print("=" * 55)
 
-    if so101_ok and fr5_ok:
-        print("  Both checks PASSED — ready to run teleop.py")
+    if fr5_ok and camera_ok:
+        print("  All checks PASSED — ready to run teleop_vr.py")
         sys.exit(0)
     else:
-        print("  One or more checks FAILED — see messages above before running teleop.")
+        print("  One or more checks FAILED — see messages above.")
         sys.exit(1)
