@@ -124,6 +124,12 @@ class D405Camera:
             except Exception as exc:
                 if self._stop_evt.is_set():
                     break
+                exc_str = str(exc)
+                # Pipeline was stopped externally (USB drop, cleanup race) — exit
+                # the thread rather than spinning millions of times per second.
+                if "before start" in exc_str or self._pipeline is None:
+                    print(f"[CAMERA] Pipeline stopped unexpectedly — capture thread exiting.")
+                    break
                 consecutive_errors += 1
                 # Print at first error then every 30th to avoid flooding the console
                 # during sustained USB issues (which usually mean the camera dropped).
