@@ -18,10 +18,26 @@ Real-time teleoperation bridge that streams joint positions from a **SO-101 lead
 ## Dependencies
 
 ```bash
-pip install scservo-sdk fairino pynput numpy pandas pyserial pyrealsense2 opencv-python
+pip install -r requirements.txt
+pip install fairino-*.whl   # Fairino's SDK — install from their .whl, not PyPI
 ```
 
-> The `fairino` package is Fairino's official Python SDK. Install it from their distribution or PyPI for your controller firmware version.
+> `fairino` is Fairino's official Python SDK distributed as a `.whl`. PyPI availability varies by firmware version — use the package from their release.
+
+---
+
+## Linux Setup (one-time)
+
+Run the setup script once after cloning. It handles serial port permissions, the Intel RealSense apt repo, udev rules, Python packages, and network interface checks:
+
+```bash
+chmod +x linux_setup.sh
+./linux_setup.sh
+```
+
+**Then log out and back in** if it added you to the `dialout` group (needed for `/dev/ttyACM0` access).
+
+> **SSH users**: `pynput` requires a display session (`$DISPLAY` or `$WAYLAND_DISPLAY`). Run teleop at the physical console, or forward X11 (`ssh -X`), or set `export DISPLAY=:0` if a desktop is already running on the machine.
 
 ---
 
@@ -29,7 +45,7 @@ pip install scservo-sdk fairino pynput numpy pandas pyserial pyrealsense2 opencv
 
 ### 1. Connect hardware
 
-- Plug the SO-101 into USB — it appears as `/dev/ttyACM0` (Linux) or `COMx` (Windows)
+- Plug the SO-101 into USB — it appears as `/dev/ttyACM0` on Linux
 - Connect the FR5 controller via Ethernet and confirm you're on the same subnet (`192.168.58.x`)
 - Mount the D405 on the FR5 wrist and plug into a USB 3.0 port directly on the motherboard (no hub)
 
@@ -37,7 +53,7 @@ pip install scservo-sdk fairino pynput numpy pandas pyserial pyrealsense2 opencv
 
 ```bash
 python check_network.py     # ping + TCP check to FR5
-python check_hardware.py    # SO-101 serial + FR5 joint read
+python check_hardware.py    # SO-101 all motors + FR5 joint read
 ```
 
 ### 3. Identify motor IDs (first-time only)
@@ -295,12 +311,14 @@ logger.py              — episode recording: CSV + JSON + MP4 + timestamps
 camera.py              — Intel RealSense D405 capture (color-only background thread)
 config.py              — all configuration parameters
 
-check_hardware.py      — hardware connectivity diagnostic
-check_network.py       — FR5 network diagnostic
+check_hardware.py      — hardware diagnostic: SO-101 all motors + FR5 joint read
+check_network.py       — FR5 network diagnostic (ping + TCP)
 scan_motor_ids.py      — scan servo bus for all motor IDs
 probe_one_motor.py     — identify motors one at a time
 so101_read_test.py     — isolated SO-101 leader read diagnostic
 fr5_motion_test.py     — isolated FR5 ServoJ motion diagnostic
+linux_setup.sh         — one-time Linux environment setup
+requirements.txt       — Python package list
 
 docs/
   mapper_explained.md      — full walkthrough of delta-mapping logic
