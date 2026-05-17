@@ -35,34 +35,37 @@ class D405Camera:
         import pyrealsense2 as rs
 
         cfg = rs.config()
-        cfg.enable_stream(
-            rs.stream.color,
-            CAMERA_WIDTH, CAMERA_HEIGHT,
-            rs.format.bgr8,
-            CAMERA_FPS,
-        )
+        cfg.enable_stream(rs.stream.color, CAMERA_WIDTH, CAMERA_HEIGHT, rs.format.bgr8, CAMERA_FPS)
 
         self._pipeline = rs.pipeline()
         profile = self._pipeline.start(cfg)
 
-        intr = (
-            profile.get_stream(rs.stream.color)
-                   .as_video_stream_profile()
-                   .get_intrinsics()
-        )
+        ci = profile.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
+
+        # Save distortion model name alongside coefficients — the D405 color
+        # stream uses inverse-Brown-Conrady, which differs from OpenCV's default
+        # Brown-Conrady. Knowing the model prevents wrong undistortion later.
         self._intrinsics = {
-            "width":       intr.width,
-            "height":      intr.height,
-            "fx":          intr.fx,
-            "fy":          intr.fy,
-            "cx":          intr.ppx,
-            "cy":          intr.ppy,
-            "dist_coeffs": list(intr.coeffs),   # [k1, k2, p1, p2, k3]
+            "width":            ci.width,
+            "height":           ci.height,
+            "fx":               ci.fx,
+            "fy":               ci.fy,
+            "cx":               ci.ppx,
+            "cy":               ci.ppy,
+            "distortion_model": str(ci.model).split(".")[-1],
+            "dist_coeffs":      list(ci.coeffs),
         }
+
+        # Warm up — let auto-exposure settle before starting the capture thread.
+        for _ in range(5):
+            try:
+                self._pipeline.wait_for_frames(timeout_ms=1000)
+            except Exception:
+                pass
 
         print(
             f"[CAMERA] D405 ready — {CAMERA_WIDTH}×{CAMERA_HEIGHT} @ {CAMERA_FPS} fps  "
-            f"fx={intr.fx:.1f} fy={intr.fy:.1f} cx={intr.ppx:.1f} cy={intr.ppy:.1f}"
+            f"fx={ci.fx:.1f} fy={ci.fy:.1f} cx={ci.ppx:.1f} cy={ci.ppy:.1f}"
         )
 
         self._stop_evt.clear()
@@ -102,13 +105,15 @@ class D405Camera:
     # ── background capture thread ─────────────────────────────────────────────
 
     def _loop(self):
+        consecutive_errors = 0
         while not self._stop_evt.is_set():
             try:
-                framesets = self._pipeline.wait_for_frames(timeout_ms=200)
+                framesets = self._pipeline.wait_for_frames(timeout_ms=1000)
                 color     = framesets.get_color_frame()
                 if not color:
                     continue
 
+                consecutive_errors = 0
                 ts  = time.time()
                 img = np.asanyarray(color.get_data()).copy()   # H×W×3 BGR uint8
 
@@ -117,8 +122,13 @@ class D405Camera:
                         self._frames.append((ts, img))
 
             except Exception as exc:
-                if not self._stop_evt.is_set():
-                    print(f"[CAMERA] Frame error: {exc}")
+                if self._stop_evt.is_set():
+                    break
+                consecutive_errors += 1
+                # Print at first error then every 30th to avoid flooding the console
+                # during sustained USB issues (which usually mean the camera dropped).
+                if consecutive_errors == 1 or consecutive_errors % 30 == 0:
+                    print(f"[CAMERA] Frame error #{consecutive_errors}: {exc}")
 
     def __enter__(self):
         self.start()

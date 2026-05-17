@@ -13,6 +13,7 @@ Data logging:
 
 import time
 import threading
+from contextlib import contextmanager
 
 from pynput import keyboard
 
@@ -24,6 +25,16 @@ from logger import EpisodeLogger
 from singularity import check as singularity_check, Level
 from gripper import DHGripperController
 from camera import D405Camera
+
+
+@contextmanager
+def _camera_cleanup(camera):
+    """Ensures camera.stop() runs even if a later context manager fails to enter."""
+    try:
+        yield
+    finally:
+        if camera:
+            camera.stop()
 
 
 class TeleopSession:
@@ -71,7 +82,7 @@ class TeleopSession:
             print(f"[CAMERA] Could not start D405 ({exc}) — continuing without camera.")
             camera = None
 
-        with SO101Reader() as arm, FR5Controller() as robot:
+        with _camera_cleanup(camera), SO101Reader() as arm, FR5Controller() as robot:
             # Capture home poses — delta mapping means first command is always Δ=0
             so101_home        = arm.read_positions_deg()
             self._fr5_current = robot.get_joint_positions()
@@ -183,9 +194,6 @@ class TeleopSession:
                     path = self._logger.stop()
                     if path:
                         print(f"[REC] Auto-saved episode to {path}")
-
-        if camera:
-            camera.stop()
 
         if self._estop:
             print("[E-STOP] Motion halted. Check robot state before restarting.")
