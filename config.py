@@ -58,8 +58,8 @@ MAX_DELTA_PER_JOINT = [0.16, 0.12, 0.12, 0.30, 0.08, 0.20]
 #                       J1     J2     J3     J4    J5    J6
 #                       20°/s  15°/s  15°/s  37/s  10/s  25°/s
 
-FR5_SERVO_VEL           = 5       # ServoJ velocity % — start low, tune up
-FR5_FILTER_T            = 0.08    # ServoJ trajectory filter (seconds) — smooths between commands
+FR5_SERVO_VEL           = 15      # ServoJ velocity % — start low, tune up
+FR5_FILTER_T            = 0.04    # ServoJ trajectory filter (seconds) — smooths between commands
 
 # From GetJointSoftLimitDeg() on this controller, with 5° margin inside each limit.
 FR5_JOINT_LIMITS = [
