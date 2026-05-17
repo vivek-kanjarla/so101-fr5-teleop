@@ -56,6 +56,8 @@ def so101_to_fr5(
     result = []
     for t, p, lim in zip(target_clamped, prev_fr5_deg, limits):
         d = np.clip(t - p, -lim, lim)
-        result.append(p + d)
+        # float() is required: p + d is numpy.float64, which xmlrpc.client
+        # cannot marshal — ServoJ would raise TypeError on every call.
+        result.append(float(p + d))
 
     return result

@@ -80,6 +80,10 @@ class FR5Controller:
         return list(vels)
 
     def servo_j(self, joints_deg: list[float]):
+        # Coerce to plain Python float — xmlrpc.client cannot marshal
+        # numpy.float64 (raises TypeError). This is the Python→XML-RPC
+        # boundary, so normalise here regardless of what the caller passes.
+        joints_deg = [float(j) for j in joints_deg]
         with self._rpc_lock:
             err = self._robot.ServoJ(
                 joints_deg, [0] * 6, FR5_SERVO_VEL, 0, 0.008, FR5_FILTER_T, 0
