@@ -32,8 +32,15 @@ class SO101Reader:
             raise RuntimeError(f"Cannot set baud rate {SO101_BAUDRATE}")
         # Leader arm must move freely — disable torque on all motors so the
         # servos stop fighting the human and we only read encoder positions.
+        # A failed write here leaves a motor stiff and its encoder frozen, so
+        # verify each one rather than firing and forgetting.
         for mid in self._motor_ids + [SO101_GRIPPER_ID]:
-            self._packet.write1ByteTxRx(self._port, mid, ADDR_TORQUE_ENABLE, 0)
+            result, error = self._packet.write1ByteTxRx(
+                self._port, mid, ADDR_TORQUE_ENABLE, 0
+            )
+            if result != COMM_SUCCESS:
+                print(f"[SO-101] WARNING: torque-disable failed on motor {mid} "
+                      f"— that joint will be stiff and read frozen")
 
     def close(self):
         self._port.closePort()

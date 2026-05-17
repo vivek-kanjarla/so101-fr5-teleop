@@ -17,7 +17,7 @@ from contextlib import contextmanager
 
 from pynput import keyboard
 
-from config import LOOP_PERIOD, LOG_DIR, MAX_DELTA_DEG_PER_CYCLE, INSTRUCTION_FILE, LOG_STATE_DOWNSAMPLE
+from config import LOOP_HZ, LOOP_PERIOD, LOG_DIR, MAX_DELTA_DEG_PER_CYCLE, INSTRUCTION_FILE, LOG_STATE_DOWNSAMPLE
 from so101 import SO101Reader
 from fr5 import FR5Controller
 from mapper import so101_to_fr5
@@ -46,6 +46,7 @@ class TeleopSession:
         self._fr5_current  = [0.0] * 6
         self._sing_level   = Level.CLEAR
         self._cycle        = 0
+        self._comm_errors  = 0
         self._state_cache  = {"actual": None, "eef": None, "vel": None}
 
     # ── keyboard ──────────────────────────────────────────────────────────────
@@ -105,79 +106,102 @@ class TeleopSession:
                 while not self._stop_event.is_set():
                     t0 = time.monotonic()
 
-                    # Re-home: freeze current positions as new reference
-                    if self._rehome_event.is_set():
-                        self._rehome_event.clear()
-                        so101_home = arm.read_positions_deg()
-                        fr5_home   = list(self._fr5_current)
-                        self._sing_level = Level.CLEAR
-                        print(f"\n[RE-HOME] New home captured — FR5 J1..J6: "
-                              f"{[f'{v:.1f}' for v in fr5_home]}")
-
-                    so101_pos = arm.read_positions_deg()
-
-                    # Update gripper state and handle pause if needed
                     try:
-                        gripper_ctrl.update_so101(arm.read_gripper_deg())
-                    except Exception:
-                        pass
-                    if gripper_ctrl.wants_pause():
-                        gripper_ctrl.pause_for_gripper(robot)
-                        # Reset rate-limiter to current actual position after pause
-                        self._fr5_current = robot.get_joint_positions()
+                        # Re-home: freeze current positions as new reference
+                        if self._rehome_event.is_set():
+                            self._rehome_event.clear()
+                            so101_home = arm.read_positions_deg()
+                            fr5_home   = list(self._fr5_current)
+                            self._sing_level = Level.CLEAR
+                            print(f"\n[RE-HOME] New home captured — FR5 J1..J6: "
+                                  f"{[f'{v:.1f}' for v in fr5_home]}")
 
-                    # Singularity check on current FR5 position
-                    level, scale, msg = singularity_check(self._fr5_current)
-                    if level != self._sing_level:
+                        so101_pos = arm.read_positions_deg()
+
+                        # Update gripper state and handle pause if needed
+                        try:
+                            gripper_ctrl.update_so101(arm.read_gripper_deg())
+                        except Exception:
+                            pass
+                        if gripper_ctrl.wants_pause():
+                            gripper_ctrl.pause_for_gripper(robot)
+                            # Reset rate-limiter to current actual position after pause
+                            self._fr5_current = robot.get_joint_positions()
+
+                        # Singularity check on current FR5 position
+                        level, scale, msg = singularity_check(self._fr5_current)
+                        if level != self._sing_level:
+                            if level == Level.DANGER:
+                                print(f"\n[SINGULARITY DANGER] {msg} — motion blocked")
+                            elif level == Level.WARN:
+                                print(f"\n[SINGULARITY WARN]   {msg} — speed reduced to {scale*100:.0f}%")
+                            elif level == Level.CLEAR:
+                                print("\n[SINGULARITY] Clear")
+                            self._sing_level = level
+
                         if level == Level.DANGER:
-                            print(f"\n[SINGULARITY DANGER] {msg} — motion blocked")
-                        elif level == Level.WARN:
-                            print(f"\n[SINGULARITY WARN]   {msg} — speed reduced to {scale*100:.0f}%")
-                        elif level == Level.CLEAR:
-                            print("\n[SINGULARITY] Clear")
-                        self._sing_level = level
+                            fr5_cmd = list(self._fr5_current)
+                        else:
+                            effective_limit = MAX_DELTA_DEG_PER_CYCLE * scale
+                            fr5_cmd = so101_to_fr5(
+                                so101_pos, so101_home, fr5_home,
+                                self._fr5_current, delta_limit=effective_limit
+                            )
 
-                    if level == Level.DANGER:
-                        fr5_cmd = list(self._fr5_current)
-                    else:
-                        effective_limit = MAX_DELTA_DEG_PER_CYCLE * scale
-                        fr5_cmd = so101_to_fr5(
-                            so101_pos, so101_home, fr5_home,
-                            self._fr5_current, delta_limit=effective_limit
+                        log_time = time.time()   # capture before servo_j for accurate timestamp
+                        robot.servo_j(fr5_cmd)
+                        self._fr5_current = fr5_cmd
+                        self._cycle += 1
+
+                        # ── read actual robot state for logging ───────────────
+                        # Reads happen every LOG_STATE_DOWNSAMPLE cycles so the
+                        # ~6–9ms RPC overhead doesn't blow the 8ms ServoJ budget.
+                        # Cached values fill the off cycles — every row complete.
+                        if self._logger.recording and self._cycle % LOG_STATE_DOWNSAMPLE == 0:
+                            try:
+                                self._state_cache["actual"] = robot.get_joint_positions()
+                            except Exception:
+                                pass
+                            try:
+                                self._state_cache["eef"] = robot.get_eef_pose()
+                            except Exception:
+                                pass
+                            try:
+                                self._state_cache["vel"] = robot.get_joint_velocities()
+                            except Exception:
+                                pass
+
+                        gripper_norm = gripper_ctrl.get_normalized()
+
+                        self._logger.log(
+                            log_time, so101_pos, fr5_cmd,
+                            fr5_actual=self._state_cache["actual"],
+                            fr5_eef=self._state_cache["eef"],
+                            gripper_norm=gripper_norm,
+                            fr5_vel=self._state_cache["vel"],
                         )
 
-                    log_time = time.time()   # capture before servo_j for accurate timestamp
-                    robot.servo_j(fr5_cmd)
-                    self._fr5_current = fr5_cmd
-                    self._cycle += 1
+                        # Heartbeat (~1 Hz): confirms the leader is being read
+                        # and shows whether the follower is actually commanded
+                        # to move. so101 drift ≈ 0 → leader read frozen; so101
+                        # drift > 0 but fr5 drift ≈ 0 → mapper problem.
+                        if self._cycle % LOOP_HZ == 0:
+                            so101_drift = max(abs(so101_pos[k] - so101_home[k]) for k in so101_pos)
+                            fr5_drift   = max(abs(c - h) for c, h in zip(fr5_cmd, fr5_home))
+                            print(f"[HB] cyc={self._cycle}  sing={level.value}  "
+                                  f"SO101 moved {so101_drift:6.1f}°  →  "
+                                  f"FR5 cmd moved {fr5_drift:6.1f}°  errs={self._comm_errors}")
 
-                    # ── read actual robot state for logging ───────────────────
-                    # Reads happen every LOG_STATE_DOWNSAMPLE cycles so the
-                    # ~6–9ms RPC overhead doesn't blow the 8ms ServoJ budget.
-                    # Cached values fill in the off cycles — every row is complete.
-                    if self._logger.recording and self._cycle % LOG_STATE_DOWNSAMPLE == 0:
-                        try:
-                            self._state_cache["actual"] = robot.get_joint_positions()
-                        except Exception:
-                            pass
-                        try:
-                            self._state_cache["eef"] = robot.get_eef_pose()
-                        except Exception:
-                            pass
-                        try:
-                            self._state_cache["vel"] = robot.get_joint_velocities()
-                        except Exception:
-                            pass
-
-                    gripper_norm = gripper_ctrl.get_normalized()
-
-                    self._logger.log(
-                        log_time, so101_pos, fr5_cmd,
-                        fr5_actual=self._state_cache["actual"],
-                        fr5_eef=self._state_cache["eef"],
-                        gripper_norm=gripper_norm,
-                        fr5_vel=self._state_cache["vel"],
-                    )
+                    except Exception as exc:
+                        # A transient SO-101 serial glitch or ServoJ RPC error
+                        # must NOT tear down the whole session — skip this one
+                        # cycle and retry. Persistent faults surface in the
+                        # throttled log and the heartbeat error counter.
+                        self._comm_errors += 1
+                        if self._comm_errors == 1 or self._comm_errors % 50 == 0:
+                            print(f"[WARN] cycle skipped (error #{self._comm_errors}): {exc!r}")
+                        time.sleep(LOOP_PERIOD)
+                        continue
 
                     elapsed = time.monotonic() - t0
                     sleep   = LOOP_PERIOD - elapsed
