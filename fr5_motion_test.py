@@ -1,16 +1,15 @@
 """
 fr5_motion_test.py — isolate the FR5 control path from the teleop pipeline.
 
-Moves ONLY the FR5: no SO-101, no mapper, no singularity check, no gripper.
+Moves ONLY the FR5: no mapper, no singularity check, no gripper.
 Ramps joint 1 (shoulder pan) a few degrees with ServoJ, then reports whether
 the robot physically moved.
 
-  FR5 MOVES here      → control path works; the bug is in the teleop pipeline
-                        (SO-101 read, mapper, or the singularity check).
+  FR5 MOVES here      → control path works; bug is in the mapper or Quest input.
   FR5 does NOT move   → bug is in the FR5 SDK / controller layer
                         (servo mode, enable state, or a controller fault).
 
-Run on the Linux machine with the FR5 powered and reachable:
+Run with the FR5 powered and reachable:
     python fr5_motion_test.py
 """
 
@@ -26,7 +25,7 @@ HZ     = 125
 
 def main():
     print("=" * 62)
-    print("  FR5 ISOLATED MOTION TEST  —  no SO-101, no mapper")
+    print("  FR5 ISOLATED MOTION TEST  —  no mapper, no Quest input")
     print("=" * 62)
 
     with FR5Controller() as robot:
@@ -75,7 +74,7 @@ def main():
         print("-" * 62)
         if abs(moved) > 0.5:
             print("  RESULT: FR5 MOVED — control path works.")
-            print("          Bug is in the teleop pipeline (SO-101 / mapper / singularity).")
+            print("          Bug is in the mapper or Quest 3 input pipeline.")
         else:
             print("  RESULT: FR5 DID NOT MOVE — bug is in the FR5 SDK / controller layer.")
             print("          Check: servo mode active? robot enabled? controller fault?")

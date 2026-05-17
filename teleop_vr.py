@@ -30,7 +30,7 @@ from pynput import keyboard
 from config import (
     LOOP_HZ, LOOP_PERIOD,
     LOG_DIR, INSTRUCTION_FILE, LOG_STATE_DOWNSAMPLE,
-    VR_GRIPPER_OPEN_THRESHOLD, VR_GRIPPER_CLOSE_THRESHOLD,
+    GRIPPER_OPEN_THRESHOLD, GRIPPER_CLOSE_THRESHOLD,
     MAX_DELTA_DEG_PER_CYCLE,
 )
 from quest3 import Quest3Reader
@@ -92,24 +92,21 @@ class VRTeleopSession:
 
     # ── gripper trigger mapping ───────────────────────────────────────────────
 
-    def _update_gripper_from_trigger(self, trigger: float, gripper_ctrl: DHGripperController, robot):
+    def _update_gripper_from_trigger(self, trigger: float, gripper_ctrl: DHGripperController):
         """Map Quest trigger analog to gripper open/close via hysteresis."""
-        if trigger >= VR_GRIPPER_CLOSE_THRESHOLD:
+        if trigger >= GRIPPER_CLOSE_THRESHOLD:
             desired = "closed"
-        elif trigger <= VR_GRIPPER_OPEN_THRESHOLD:
+        elif trigger <= GRIPPER_OPEN_THRESHOLD:
             desired = "open"
         else:
             return  # hysteresis band — hold current state
 
         if desired != self._gripper_state:
-            # Inject the desired state into DHGripperController's internal state
-            # mechanism via update_so101() mapped to extreme values:
-            # open  → normalised 1.0 (above OPEN_THRESHOLD in gripper.py)
-            # close → normalised 0.0 (below CLOSE_THRESHOLD in gripper.py)
-            from config import SO101_GRIPPER_RANGE
-            lo, hi = SO101_GRIPPER_RANGE
-            fake_deg = hi if desired == "open" else lo
-            gripper_ctrl.update_so101(fake_deg)
+            # Pass normalised extremes so gripper.py threshold logic triggers:
+            #   open   → 0.0 (≤ GRIPPER_OPEN_THRESHOLD)
+            #   closed → 1.0 (≥ GRIPPER_CLOSE_THRESHOLD)
+            norm = 0.0 if desired == "open" else 1.0
+            gripper_ctrl.update_normalized(norm)
             self._gripper_state = desired
 
     # ── main loop ─────────────────────────────────────────────────────────────
@@ -182,7 +179,7 @@ class VRTeleopSession:
 
                         # Gripper from trigger
                         self._update_gripper_from_trigger(
-                            quest_state.trigger, gripper_ctrl, robot
+                            quest_state.trigger, gripper_ctrl
                         )
                         if gripper_ctrl.wants_pause():
                             gripper_ctrl.pause_for_gripper(robot)
@@ -237,14 +234,12 @@ class VRTeleopSession:
                                 except Exception:
                                     pass
 
-                        # Log: use trigger as gripper_norm (0=open, 1=closed matches convention)
                         self._logger.log(
                             log_time,
-                            # so101 field reused for Quest controller pose for CSV compatibility
                             {
-                                "quest_pos_x": float(quest_state.pos[0]),
-                                "quest_pos_y": float(quest_state.pos[1]),
-                                "quest_pos_z": float(quest_state.pos[2]),
+                                "quest_pos_x":  float(quest_state.pos[0]),
+                                "quest_pos_y":  float(quest_state.pos[1]),
+                                "quest_pos_z":  float(quest_state.pos[2]),
                                 "quest_quat_x": float(quest_state.quat[0]),
                                 "quest_quat_y": float(quest_state.quat[1]),
                                 "quest_quat_z": float(quest_state.quat[2]),

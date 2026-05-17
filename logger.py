@@ -3,12 +3,12 @@ logger.py — saves teleoperation episodes to CSV + JSON metadata + MP4 video.
 
 Per-timestep columns logged:
   timestamp                    — wall-clock float64 (seconds)
-  so101_<joint>                — SO-101 leader joint positions (deg)
+  <obs_key>                    — controller observation fields (keys passed by caller)
   fr5_cmd_j[1..6]             — FR5 commanded joint positions (deg)
   fr5_actual_j[1..6]          — FR5 actual joint positions (deg)
   fr5_eef_x/y/z_mm            — TCP position in mm
   fr5_eef_rx/ry/rz_deg        — TCP Euler orientation (deg)
-  gripper_norm                 — SO-101 gripper normalised [0.0, 1.0]
+  gripper_norm                 — gripper state normalised [0.0, 1.0]
   fr5_vel_j[1..6]             — FR5 actual joint velocities (deg/s)
 
 Per-episode files:
@@ -65,7 +65,7 @@ class EpisodeLogger:
     def log(
         self,
         timestamp: float,
-        so101: dict[str, float],
+        observation: dict[str, float],
         fr5_cmd: list[float],
         fr5_actual: list[float] | None = None,
         fr5_eef: list[float] | None = None,
@@ -77,8 +77,8 @@ class EpisodeLogger:
 
         row: dict = {"timestamp": timestamp}
 
-        for k, v in so101.items():
-            row[f"so101_{k}"] = v
+        for k, v in observation.items():
+            row[k] = v
 
         for i, v in enumerate(fr5_cmd, start=1):
             row[f"fr5_cmd_j{i}"] = v
