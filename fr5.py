@@ -91,6 +91,16 @@ class FR5Controller:
         if err not in (0, None):
             raise IOError(f"ServoJ failed with error {err}")
 
+    def activate_gripper(self, index: int) -> int:
+        with self._rpc_lock:
+            return self._robot.ActGripper(index, 1)
+
+    def send_gripper(self, index, pct, vel, force, maxtime, blocking, gtype) -> int:
+        with self._rpc_lock:
+            return self._robot.MoveGripper(
+                index, pct, vel, force, maxtime, blocking, gtype, 0, 0, 0
+            )
+
     def stop(self):
         try:
             with self._rpc_lock:

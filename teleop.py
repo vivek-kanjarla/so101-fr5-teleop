@@ -89,7 +89,7 @@ class TeleopSession:
             fr5_home          = list(self._fr5_current)
 
             gripper_ctrl = DHGripperController()
-            gripper_ctrl.start()
+            gripper_ctrl.start(robot)
 
             print(f"SO-101 home: {[f'{v:.1f}' for v in so101_home.values()]}")
             print(f"FR5 home:    {[f'{v:.1f}' for v in fr5_home]}")

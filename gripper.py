@@ -30,7 +30,7 @@ class DHGripperController:
     POLL_HZ = 5
 
     def __init__(self):
-        self._rpc       = None
+        self._robot     = None
         self._thread    = None
         self._stop_evt  = threading.Event()
         self._state     = None      # "open" | "closed" | None
@@ -90,16 +90,14 @@ class DHGripperController:
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
-    def start(self):
-        from fairino import Robot
-        from config import FR5_IP
-        self._rpc = Robot.RPC(FR5_IP)
-        Robot.RPC.is_connect = True
+    def start(self, robot):
+        """Pass the main FR5Controller — gripper shares its RPC connection."""
+        self._robot = robot
 
-        err = self._rpc.ActGripper(GRIPPER_INDEX, 1)
+        err = robot.activate_gripper(GRIPPER_INDEX)
         if err != 0:
             print(f"[GRIPPER] ActGripper failed (err={err}) — check gripper config on FR5 controller")
-            self._rpc = None
+            self._robot = None
             return
         time.sleep(0.5)
         print(f"[GRIPPER] DH AG-160-95 activated (index={GRIPPER_INDEX})")
@@ -114,7 +112,7 @@ class DHGripperController:
         self._servo_paused.set()
         if self._thread:
             self._thread.join(timeout=2)
-        self._rpc = None
+        self._robot = None
 
     # ── background thread ─────────────────────────────────────────────────────
 
@@ -153,13 +151,12 @@ class DHGripperController:
                     break
 
                 try:
-                    err = self._rpc.MoveGripper(
+                    err = self._robot.send_gripper(
                         GRIPPER_INDEX, pct,
                         GRIPPER_VEL_PCT, GRIPPER_FORCE_PCT,
                         GRIPPER_MAXTIME_MS,
                         1,             # non-blocking
                         GRIPPER_TYPE,
-                        0, 0, 0,
                     )
                     if err == 0:
                         self._state = desired
