@@ -16,7 +16,6 @@ Usage:
 
 import argparse
 import json
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -32,10 +31,6 @@ import pyarrow.parquet as pq
 CHUNKS_SIZE = 1000   # episodes per chunk folder
 
 # CSV column groups (must match logger.py)
-SO101_COLS = [
-    "so101_shoulder_pan", "so101_shoulder_lift", "so101_elbow_flex",
-    "so101_wrist_flex",   "so101_wrist_roll",
-]
 CMD_COLS    = [f"fr5_cmd_j{i}"    for i in range(1, 7)]
 ACTUAL_COLS = [f"fr5_actual_j{i}" for i in range(1, 7)]
 EEF_COLS    = ["fr5_eef_x_mm", "fr5_eef_y_mm", "fr5_eef_z_mm",
@@ -93,11 +88,7 @@ def _downsample(df: pd.DataFrame, cam_ts: np.ndarray | None, target_fps: int) ->
         merged = merged.drop(columns=["cam_ts"])
         return merged.reset_index(drop=True)
     else:
-        # Uniform stride — keep every N-th row
-        stride = max(1, round(len(df) / max(1, int(len(df) / (1.0 / target_fps)
-                                              * (df["timestamp"].iloc[-1] - df["timestamp"].iloc[0])
-                                              + 0.5))))
-        # Simpler: derive stride from recorded loop rate
+        # Uniform stride — derive from recorded loop rate vs target
         duration = df["timestamp"].iloc[-1] - df["timestamp"].iloc[0]
         if duration > 0:
             recorded_hz = (len(df) - 1) / duration
@@ -165,14 +156,16 @@ def convert(input_dir: Path, output_dir: Path, target_fps: int) -> None:
 
     print(f"Found {len(ep_json_paths)} episode(s) in {input_dir}")
 
-    # First pass: collect all unique language instructions → stable task index
+    # First pass: collect all unique language instructions → stable task index.
+    # Empty/missing instructions are kept as "" and assigned their own index so
+    # they are never silently merged with a real task.
     instructions: list[str] = []
     for jp in ep_json_paths:
         try:
             with open(jp) as f:
                 m = json.load(f)
             instr = m.get("language_instruction", "").strip()
-            if instr and instr not in instructions:
+            if instr not in instructions:
                 instructions.append(instr)
         except Exception:
             pass
@@ -189,9 +182,10 @@ def convert(input_dir: Path, output_dir: Path, target_fps: int) -> None:
 
     total_frames    = 0
     total_videos    = 0
-    episode_records = []   # (ep_idx, num_frames, task_idx, has_video)
+    total_episodes  = 0   # counts only successfully written episodes
 
-    for ep_idx, jp in enumerate(ep_json_paths):
+    for jp in ep_json_paths:
+        ep_idx      = total_episodes   # consecutive; only increments on success
         chunk_name  = f"chunk-{ep_idx // CHUNKS_SIZE:03d}"
         ep_name     = f"episode_{ep_idx:06d}"
 
@@ -229,13 +223,12 @@ def convert(input_dir: Path, output_dir: Path, target_fps: int) -> None:
             has_video = True
             total_videos += 1
 
-        total_frames += len(df)
-        episode_records.append((ep_idx, len(df), task_idx, has_video))
-        print(f"  [{ep_idx+1}/{len(ep_json_paths)}] {ep_name}  "
+        total_frames   += len(df)
+        total_episodes += 1
+        print(f"  [{total_episodes}/{len(ep_json_paths)}] {ep_name}  "
               f"frames={len(df)}  video={'yes' if has_video else 'no'}  task={task_idx}")
 
-    total_episodes = len(episode_records)
-    total_chunks   = max(1, (total_episodes + CHUNKS_SIZE - 1) // CHUNKS_SIZE)
+    total_chunks = max(1, (total_episodes + CHUNKS_SIZE - 1) // CHUNKS_SIZE)
 
     # ── meta/info.json ────────────────────────────────────────────────────────
     has_any_video = total_videos > 0
