@@ -11,11 +11,14 @@ Data logging:
   Each episode saves a CSV (timestep data) + JSON (metadata) under ./episodes/.
 """
 
+import sys
 import time
 import threading
 from contextlib import contextmanager
 
 from pynput import keyboard
+
+NO_GRIPPER = "--no-gripper" in sys.argv
 
 from config import LOOP_HZ, LOOP_PERIOD, LOG_DIR, MAX_DELTA_DEG_PER_CYCLE, INSTRUCTION_FILE, LOG_STATE_DOWNSAMPLE
 from so101 import SO101Reader
@@ -44,6 +47,7 @@ class TeleopSession:
         self._estop        = False
         self._logger       = EpisodeLogger()
         self._fr5_current  = [0.0] * 6
+        self._prev_step    = [0.0] * 6   # velocity memory for acceleration limiter
         self._sing_level   = Level.CLEAR
         self._cycle        = 0
         self._comm_errors  = 0
@@ -91,7 +95,10 @@ class TeleopSession:
             fr5_home          = list(self._fr5_current)
 
             gripper_ctrl = DHGripperController()
-            gripper_ctrl.start(robot)
+            if NO_GRIPPER:
+                print("[GRIPPER] Disabled (--no-gripper flag)")
+            else:
+                gripper_ctrl.start(robot)
 
             print(f"SO-101 home: {[f'{v:.1f}' for v in so101_home.values()]}")
             print(f"FR5 home:    {[f'{v:.1f}' for v in fr5_home]}")
@@ -113,6 +120,7 @@ class TeleopSession:
                             self._rehome_event.clear()
                             so101_home = arm.read_positions_deg()
                             fr5_home   = list(self._fr5_current)
+                            self._prev_step  = [0.0] * 6   # clear velocity memory
                             self._sing_level = Level.CLEAR
                             print(f"\n[RE-HOME] New home captured — FR5 J1..J6: "
                                   f"{[f'{v:.1f}' for v in fr5_home]}")
@@ -128,6 +136,7 @@ class TeleopSession:
                             gripper_ctrl.pause_for_gripper(robot)
                             # Reset rate-limiter to current actual position after pause
                             self._fr5_current = robot.get_joint_positions()
+                            self._prev_step   = [0.0] * 6   # clear velocity memory
 
                         # Singularity check on current FR5 position
                         level, scale, msg = singularity_check(self._fr5_current)
@@ -142,11 +151,13 @@ class TeleopSession:
 
                         if level == Level.DANGER:
                             fr5_cmd = list(self._fr5_current)
+                            self._prev_step = [0.0] * 6   # clear velocity memory when blocked
                         else:
                             effective_limit = MAX_DELTA_DEG_PER_CYCLE * scale
-                            fr5_cmd = so101_to_fr5(
+                            fr5_cmd, self._prev_step = so101_to_fr5(
                                 so101_pos, so101_home, fr5_home,
-                                self._fr5_current, delta_limit=effective_limit
+                                self._fr5_current, self._prev_step,
+                                delta_limit=effective_limit,
                             )
 
                         log_time = time.time()   # capture before servo_j for accurate timestamp
@@ -196,9 +207,14 @@ class TeleopSession:
                         if self._cycle % LOOP_HZ == 0:
                             so101_drift = max(abs(so101_pos[k] - so101_home[k]) for k in so101_pos)
                             fr5_drift   = max(abs(c - h) for c, h in zip(fr5_cmd, fr5_home))
+                            try:
+                                actual = robot.get_joint_positions()
+                                actual_str = f"  actual_J1={actual[0]:.1f}°"
+                            except Exception:
+                                actual_str = "  actual_J1=ERR"
                             print(f"[HB] cyc={self._cycle}  sing={level.value}  "
                                   f"SO101 moved {so101_drift:6.1f}°  →  "
-                                  f"FR5 cmd moved {fr5_drift:6.1f}°  errs={self._comm_errors}")
+                                  f"FR5 cmd moved {fr5_drift:6.1f}°{actual_str}  errs={self._comm_errors}")
 
                     except Exception as exc:
                         # A transient SO-101 serial glitch or ServoJ RPC error

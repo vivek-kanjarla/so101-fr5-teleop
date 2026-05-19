@@ -86,6 +86,7 @@ class DHGripperController:
 
         with robot._rpc_lock:
             robot._robot.RobotEnable(1)
+        time.sleep(0.5)                     # drives need ~500ms to energise after re-enable
         robot.start_servo_mode()            # re-enter ServoJ mode
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
