@@ -189,11 +189,16 @@ TRIM_KEEP_AFTER_S       = 2.0    # seconds of context kept after final motion
 # ── Episode quality scoring ───────────────────────────────────────────────────
 # Weighted 0..100 score combining smoothness, completion duration, and motion
 # efficiency. Used to rank/filter demonstrations so ACT trains on the best data.
-QUALITY_W_SMOOTHNESS      = 0.5
+# Smoothness is the most reliable demonstration-quality signal for ACT, so it
+# carries the most weight. Cartesian "efficiency" (straightness) is de-weighted:
+# pick-and-place is inherently multi-waypoint (approach/grasp/lift/move/place),
+# so a perfect demo is NOT a straight line.
+QUALITY_W_SMOOTHNESS      = 0.6
 QUALITY_W_DURATION        = 0.2
-QUALITY_W_EFFICIENCY      = 0.3
-QUALITY_TARGET_DURATION_S = 12.0    # ideal completion time for this task
-QUALITY_JERK_REF          = 5000.0  # deg/s^3 — jerk scale for smoothness mapping
+QUALITY_W_EFFICIENCY      = 0.2
+QUALITY_TARGET_DURATION_S = 18.0     # realistic teleop pick-and-place completion time
+QUALITY_JERK_REF          = 12000.0  # deg/s^3 — calibrated to measured commanded-jerk
+                                     # scale (a typical take ≈ this → smoothness ≈ 0.5)
 QUALITY_PAUSE_VEL_THRESH  = 5.0     # deg/s — below this counts as a pause
 QUALITY_PAUSE_MIN_S       = 0.3     # min duration to count as a distinct pause
 

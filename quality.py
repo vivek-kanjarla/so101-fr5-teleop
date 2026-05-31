@@ -61,7 +61,11 @@ class QualityMetrics:
 
 
 def _joints(df: pd.DataFrame) -> np.ndarray:
-    cols = ACTUAL_COLS if all(c in df.columns for c in ACTUAL_COLS) else CMD_COLS
+    # Prefer the COMMANDED joints: they are logged every control cycle (125 Hz,
+    # dense), so derivatives (velocity/jerk/smoothness) are faithful. fr5_actual
+    # is read sparsely (~20 Hz staggered) and forward-filled into a staircase,
+    # which would inflate jerk by ~20x and wreck the smoothness metric.
+    cols = CMD_COLS if all(c in df.columns for c in CMD_COLS) else ACTUAL_COLS
     return df[cols].to_numpy(dtype=np.float64)
 
 
@@ -111,11 +115,9 @@ def compute_quality(
     q  = _joints(df)
     dt = _safe_dt(t)
 
-    # Velocity (deg/s): prefer logged, else differentiate.
-    if all(c in df.columns for c in VEL_COLS) and df[VEL_COLS].abs().to_numpy().sum() > 0:
-        vel = df[VEL_COLS].to_numpy(dtype=np.float64)
-    else:
-        vel = np.gradient(q, axis=0) / dt[:, None]
+    # Derive velocity from the dense commanded trajectory rather than the logged
+    # fr5_vel (also staggered + ffilled) so velocity/jerk stay artifact-free.
+    vel = np.gradient(q, axis=0) / dt[:, None]
     vel_norm = np.linalg.norm(vel, axis=1)
     avg_v = float(np.mean(vel_norm))
     peak_v = float(np.max(vel_norm)) if n else 0.0
