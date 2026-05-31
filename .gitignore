@@ -8,3 +8,8 @@ episodes/
 .env
 excalidraw.log
 episode_instruction.txt
+*.zip
+*.npz
+lerobot_dataset/
+episodes_filtered/
+episode_scores.csv

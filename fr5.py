@@ -45,6 +45,28 @@ class FR5Controller:
         with self._rpc_lock:
             self._robot.ResetAllError()
 
+    def recover(self):
+        """Lift a latched servo fault and re-enter servo mode.
+
+        A ServoJ fault (e.g. limit/over-speed → error 14) latches the controller
+        into a not-ready state where ServoMoveStart returns error 99. Clearing it
+        requires the full init sequence, not just ResetAllError — this mirrors
+        connect(): stop motion → clear errors → re-set mode → re-enable → settle,
+        then restart servo mode. Raises if servo mode cannot be restored.
+        """
+        with self._rpc_lock:
+            try:
+                self._robot.ServoMoveEnd()
+            except Exception:
+                pass
+            self._robot.StopMove()
+            self._robot.ResetAllError()
+            time.sleep(0.3)
+            self._robot.Mode(0)
+            self._robot.RobotEnable(1)
+        time.sleep(0.5)   # servo drives need ~500 ms to re-energise after enable
+        self.start_servo_mode()
+
     def disconnect(self):
         self.stop_servo_mode()
         self._robot = None

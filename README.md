@@ -80,7 +80,13 @@ The system captures home poses on startup — both arms must be in a safe, reach
 | `Space` | Emergency stop — kills ServoJ and exits |
 | `R` | Toggle episode recording on/off |
 | `H` | Re-home — resets the reference pose to current positions |
+| *clutch key* | (when `CLUTCH_ENABLED`) **hold** to engage teleop; release to freeze the follower. Default `ctrl_r`. Re-engaging re-syncs both arms so there is no jump. |
 | `Ctrl-C` | Graceful exit |
+
+> **Clutch mode** (`CLUTCH_ENABLED`, default off): when on, the FR5 only follows
+> while the clutch key is held. Releasing it freezes the follower so you can
+> reposition the leader freely; pressing again re-homes (no jump). With clutch
+> off, teleop is always-on (original behaviour).
 
 ### Heartbeat output
 
@@ -176,6 +182,77 @@ fr5_vel_j1 .. fr5_vel_j6        ← actual joint velocities (deg/s)
 ```
 
 Actual FR5 state is read every 2 ServoJ cycles (62.5 Hz) and cached — every CSV row has complete data.
+
+---
+
+## ACT Dataset Tooling
+
+A set of tools to curate recordings for training an **ACT (Action Chunking
+Transformer)** policy. ACT learns short action chunks from human demos, so its
+performance is bounded by demo quality and by the dataset matching the policy's
+query rate. These tools clean, score, and report on the data.
+
+### ACT export
+
+```bash
+python convert_to_lerobot.py --act          # pins 30 Hz, trims idle, writes ACT metadata
+```
+
+`--act` mode: downsamples to `ACT_FPS` (30 Hz), synchronises all cameras to the
+reference timeline, removes idle sections, and writes `meta/info.json["act"]`
+plus an `act_config.yaml`:
+
+```yaml
+dataset_hz: 30
+chunk_size: 50
+recommended_policy_frequency: 15   # ≈ dataset_hz / 2, safe open-loop ACT query rate
+action_dim: 7
+state_dim: 6
+camera_names: [wrist_cam, scene_cam]
+observation_keys: [observation.state, observation.images.wrist_cam, ...]
+```
+
+### Automatic trimming
+
+Idle frames before/after the task are removed (joint-velocity-norm + gripper
+activity detection, keeping a 2 s margin each side). On by default (`TRIM_ENABLED`),
+forced on with `--act`, disable with `--no-trim`. Trimmed indices (relative to the
+original recording) are stored in the episodes parquet (`trim_start_index`,
+`trim_end_index`). ACT trains better without dead air biasing it toward "no motion".
+
+### Quality metrics & scoring
+
+Every episode's `meta.json` gets a `quality` block (smoothness, jerk, path length,
+velocities, pauses, grasp count, efficiency, and a 0–100 `quality_score`).
+
+```bash
+python score_episodes.py                    # → episode_scores.csv, ranked
+python filter_episodes.py --top-percent 70  # keep best 70% (non-destructive, → ./episodes_filtered)
+python analyze_dataset.py                    # ACT readiness report + recommendations
+```
+
+`filter_episodes.py` symlinks (or `--copy`) the top demos into a new directory you
+then point `convert_to_lerobot.py --act` at. `analyze_dataset.py` prints an ACT
+readiness score with concrete advice ("Too much idle motion", "Insufficient
+demonstration diversity", "Dataset suitable for ACT", ...).
+
+### Smoothing & safety for clean actions
+
+- **One-Euro filter** on the SO-101 joints (`SO101_FILTER_*`) — removes tremor
+  without lagging fast moves (low-jerk leader input).
+- **Velocity limiter** (`VEL_LIMITER_ENABLED`, `VEL_LIMIT_DEG_S`, `ACC_LIMIT_DEG_S2`)
+  — smooth (tanh) per-joint velocity/acceleration saturation before ServoJ; never
+  an abrupt clip, so recorded `action` stays clean for chunk learning.
+
+### Cartesian state
+
+Each frame logs end-effector pose; the dataset exposes it as `observation.eef_pose`
+(6), and split as `observation.eef_position` (3) + `observation.eef_orientation` (3)
+for ACT configs that condition on / predict TCP pose. `eef_pose` is retained for
+backward compatibility.
+
+See **[docs/dual_camera_smoothing_and_recording.md](docs/dual_camera_smoothing_and_recording.md)**
+for the dual-camera + recording details.
 
 ---
 
@@ -285,15 +362,25 @@ All parameters live in `config.py`. See also **[docs/tuning_guide.md](docs/tunin
 ## Project Structure
 
 ```
-teleop.py              — main teleoperation loop (125 Hz ServoJ)
+teleop.py              — main teleoperation loop (125 Hz ServoJ); clutch + velocity limiter
 so101.py               — SO-101 serial reader (STS3215 servos via RS-485)
-fr5.py                 — FR5 controller (Fairino SDK, ServoJ mode)
+fr5.py                 — FR5 controller (Fairino SDK, ServoJ mode); recover()
 mapper.py              — delta joint mapping SO-101 → FR5
 gripper.py             — DH AG-160-95 gripper controller (shares FR5 connection)
 singularity.py         — singularity detection and speed scaling
-logger.py              — episode recording: CSV + JSON + MP4 + timestamps
-camera.py              — Intel RealSense D405 capture (color-only background thread)
+one_euro.py            — One-Euro adaptive low-pass filter for the leader joints
+velocity_limiter.py    — smooth (tanh) per-joint velocity/acceleration limiter
+logger.py              — episode recording (per-episode folder) + quality metrics
+camera.py              — RealSense capture (D405 wrist + D435i scene, depth, HW timestamps)
 config.py              — all configuration parameters
+
+quality.py             — per-episode quality metrics + quality_score (ACT curation)
+trimming.py            — automatic idle-section detection/trimming
+act_config.py          — generate act_config.yaml from a converted dataset
+score_episodes.py      — rank episodes by quality → episode_scores.csv
+filter_episodes.py     — keep top-percentile demos (non-destructive)
+analyze_dataset.py     — ACT readiness report + recommendations
+convert_to_lerobot.py  — LeRobot v3.0 export (dual cam + depth + eef split; --act mode)
 
 check_hardware.py      — hardware connectivity diagnostic
 check_network.py       — FR5 network diagnostic
