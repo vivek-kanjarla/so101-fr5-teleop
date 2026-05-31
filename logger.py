@@ -29,11 +29,9 @@ import time
 import numpy as np
 import pandas as pd
 
+import config
 from config import (LOG_DIR, INSTRUCTION_FILE, CAMERA_FPS, CAMERA_WIDTH, CAMERA_HEIGHT,
-                    SO101_GRIPPER_OPEN_THRESHOLD, SO101_GRIPPER_CLOSE_THRESHOLD,
-                    QUALITY_W_SMOOTHNESS, QUALITY_W_DURATION, QUALITY_W_EFFICIENCY,
-                    QUALITY_TARGET_DURATION_S, QUALITY_JERK_REF,
-                    QUALITY_PAUSE_VEL_THRESH, QUALITY_PAUSE_MIN_S)
+                    SO101_GRIPPER_OPEN_THRESHOLD, SO101_GRIPPER_CLOSE_THRESHOLD)
 
 
 class EpisodeLogger:
@@ -171,23 +169,22 @@ class EpisodeLogger:
 
         # Quality metrics (smoothness, jerk, efficiency, grasp events, score) so
         # episodes can be ranked/filtered for ACT without re-reading every CSV.
+        # Computed unlabeled (success=None → success_quality 0). Annotate later
+        # with annotate_episodes.py, then score_episodes.py recomputes the score
+        # using the success label. Diagnostics (grasps/pauses/smoothness) are valid now.
         quality_dict = None
         try:
-            from quality import compute_quality, QualityWeights
+            from quality import compute_quality, weights_from
             qm = compute_quality(
-                df,
-                QualityWeights(
-                    smoothness=QUALITY_W_SMOOTHNESS, duration=QUALITY_W_DURATION,
-                    efficiency=QUALITY_W_EFFICIENCY, target_duration_s=QUALITY_TARGET_DURATION_S,
-                    jerk_ref=QUALITY_JERK_REF, pause_vel_thresh=QUALITY_PAUSE_VEL_THRESH,
-                    pause_min_s=QUALITY_PAUSE_MIN_S,
-                ),
+                df, weights_from(config),
+                success=None, partial_success=None,
                 gripper_open_thr=SO101_GRIPPER_OPEN_THRESHOLD,
                 gripper_close_thr=SO101_GRIPPER_CLOSE_THRESHOLD,
             )
             quality_dict = qm.to_dict()
-            print(f"[LOGGER] quality_score={qm.quality_score:.1f}  smoothness={qm.smoothness:.3f}  "
-                  f"grasps={qm.grasp_count}  pauses={qm.pauses}")
+            print(f"[LOGGER] grasps={qm.grasp_count} (regrasps={qm.regrasp_count})  "
+                  f"pauses={qm.pauses}  smoothness={qm.smoothness:.3f}  "
+                  f"dur={qm.duration_s:.1f}s  — label with annotate_episodes.py")
         except Exception as exc:
             print(f"[LOGGER] quality metrics skipped: {exc!r}")
 
@@ -198,6 +195,9 @@ class EpisodeLogger:
             "language_instruction": self._instruction,
             "num_steps":            len(self._rows),
             "duration_s":           round(duration, 3),
+            # Manual success labels (set later via annotate_episodes.py).
+            "success":              None,
+            "partial_success":      None,
             "cameras":              cameras_meta,
             "camera_intrinsics":    primary.intrinsics if primary else None,
             "camera_num_frames":    len(primary_frames),

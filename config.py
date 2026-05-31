@@ -189,18 +189,26 @@ TRIM_KEEP_AFTER_S       = 2.0    # seconds of context kept after final motion
 # ── Episode quality scoring ───────────────────────────────────────────────────
 # Weighted 0..100 score combining smoothness, completion duration, and motion
 # efficiency. Used to rank/filter demonstrations so ACT trains on the best data.
-# Smoothness is the most reliable demonstration-quality signal for ACT, so it
-# carries the most weight. Cartesian "efficiency" (straightness) is de-weighted:
-# pick-and-place is inherently multi-waypoint (approach/grasp/lift/move/place),
-# so a perfect demo is NOT a straight line.
-QUALITY_W_SMOOTHNESS      = 0.6
-QUALITY_W_DURATION        = 0.2
-QUALITY_W_EFFICIENCY      = 0.2
-QUALITY_TARGET_DURATION_S = 18.0     # realistic teleop pick-and-place completion time
-QUALITY_JERK_REF          = 12000.0  # deg/s^3 — calibrated to measured commanded-jerk
-                                     # scale (a typical take ≈ this → smoothness ≈ 0.5)
-QUALITY_PAUSE_VEL_THRESH  = 5.0     # deg/s — below this counts as a pause
+# Success-centric scoring: ACT learns task success, not minimum-jerk paths.
+# A successful demo with a few pauses / re-grasps must outrank a smooth failure,
+# so success dominates and smoothness is only a small (diagnostic-weight) term.
+# Cartesian efficiency is removed from the scalar score (kept as a diagnostic) —
+# pick-and-place is inherently multi-waypoint, so straightness is a poor proxy.
+# Weights are normalised by their sum, so they need not total 1.0.
+QUALITY_W_SUCCESS    = 0.40   # successful=1.0 / partial=0.5 / failed=0.0
+QUALITY_W_DURATION   = 0.25
+QUALITY_W_GRASP      = 0.15
+QUALITY_W_PAUSE      = 0.10
+QUALITY_W_SMOOTHNESS = 0.10   # diagnostic-weight only
+
+QUALITY_TARGET_DURATION_S = 35.0    # 3-block pick-and-place (task-specific, configurable)
+QUALITY_EXPECTED_GRASPS   = 3       # pick+place 3 blocks → 3 grasp (close) events
+
+QUALITY_JERK_REF          = 12000.0 # deg/s^3 — commanded-jerk scale for smoothness
+QUALITY_PAUSE_VEL_THRESH  = 5.0     # deg/s — below this counts toward a pause
 QUALITY_PAUSE_MIN_S       = 0.3     # min duration to count as a distinct pause
+QUALITY_PAUSE_FREE        = 3       # pauses allowed free (alignment corrections)
+QUALITY_PAUSE_REF         = 12      # pauses beyond free that drive pause_score → 0
 
 # ── ACT export targets ────────────────────────────────────────────────────────
 # Surfaced into the dataset metadata and act_config.yaml so training/deployment

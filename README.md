@@ -220,21 +220,40 @@ forced on with `--act`, disable with `--no-trim`. Trimmed indices (relative to t
 original recording) are stored in the episodes parquet (`trim_start_index`,
 `trim_end_index`). ACT trains better without dead air biasing it toward "no motion".
 
-### Quality metrics & scoring
+### Success labels & quality scoring
 
-Every episode's `meta.json` gets a `quality` block (smoothness, jerk, path length,
-velocities, pauses, grasp count, efficiency, and a 0–100 `quality_score`).
+ACT learns **task success**, not minimum-jerk paths — so scoring is success-driven.
+Each episode is manually labeled, then ranked.
 
 ```bash
-python score_episodes.py                    # → episode_scores.csv, ranked
-python filter_episodes.py --top-percent 70  # keep best 70% (non-destructive, → ./episodes_filtered)
-python analyze_dataset.py                    # ACT readiness report + recommendations
+python annotate_episodes.py                  # label success / partial / fail (interactive)
+python score_episodes.py                     # → episode_scores.csv, ranked
+python filter_episodes.py                     # keep successful (discard failed), → ./episodes_filtered
+python analyze_dataset.py                     # ACT readiness (gated on success rate)
 ```
 
-`filter_episodes.py` symlinks (or `--copy`) the top demos into a new directory you
-then point `convert_to_lerobot.py --act` at. `analyze_dataset.py` prints an ACT
-readiness score with concrete advice ("Too much idle motion", "Insufficient
-demonstration diversity", "Dataset suitable for ACT", ...).
+**`quality_score` (0–100)** = normalized weighted sum:
+
+| term | weight | definition |
+|---|---|---|
+| `success_quality` | **0.40** | success=1.0 / partial=0.5 / failed=0.0 (manual label) |
+| `duration_score` | 0.25 | `min(1, TARGET_DURATION / duration)` (target 35 s, task-specific) |
+| `grasp_quality` | 0.15 | `1 − |grasps − EXPECTED_GRASPS| / EXPECTED_GRASPS` (3 for 3 blocks) |
+| `pause_score` | 0.10 | rewards few pauses; a free allowance for alignment corrections |
+| `smoothness` | 0.10 | `1/(1+rms_jerk/JERK_REF)` — **diagnostic-weight only** |
+
+Cartesian **efficiency is removed from the score** (kept as a diagnostic) — pick-and-place
+is multi-waypoint, so straightness is a poor proxy. `meta.json` also stores `grasp_count`,
+`regrasp_count`, `pauses`, `rms_jerk`, etc. as diagnostics.
+
+- **`annotate_episodes.py`** — interactive (`s`/`p`/`f`) or scripted
+  (`--episode episode_000 --success`); writes `success`/`partial_success` into `meta.json`.
+- **`filter_episodes.py`** — discards failed/unlabeled, keeps successful (add `--include-partial`),
+  ranks by score (duration → re-grasps → pauses → smoothness). A successful demo is **never**
+  removed for low smoothness alone. `--top-percent N` trims the lowest-ranked successes.
+- **`analyze_dataset.py`** — reports success rate, avg grasps/re-grasps/pauses/duration/smoothness,
+  and verdict **"ACT-ready"** or **"Needs more successful demonstrations"** based primarily on
+  success rate, not jerk.
 
 ### Smoothing & safety for clean actions
 
@@ -374,12 +393,13 @@ logger.py              — episode recording (per-episode folder) + quality metr
 camera.py              — RealSense capture (D405 wrist + D435i scene, depth, HW timestamps)
 config.py              — all configuration parameters
 
-quality.py             — per-episode quality metrics + quality_score (ACT curation)
+quality.py             — success-centric per-episode quality metrics + quality_score
 trimming.py            — automatic idle-section detection/trimming
 act_config.py          — generate act_config.yaml from a converted dataset
+annotate_episodes.py   — label demos success / partial / fail into meta.json
 score_episodes.py      — rank episodes by quality → episode_scores.csv
-filter_episodes.py     — keep top-percentile demos (non-destructive)
-analyze_dataset.py     — ACT readiness report + recommendations
+filter_episodes.py     — keep successful demos (discard failed), non-destructive
+analyze_dataset.py     — ACT readiness report (gated on success rate)
 convert_to_lerobot.py  — LeRobot v3.0 export (dual cam + depth + eef split; --act mode)
 
 check_hardware.py      — hardware connectivity diagnostic
