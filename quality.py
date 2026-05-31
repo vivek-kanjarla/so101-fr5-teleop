@@ -96,6 +96,15 @@ def compute_quality(
 ) -> QualityMetrics:
     w = weights or QualityWeights()
     n = len(df)
+
+    # Actual/eef/vel columns are logged sparsely (staggered RPC reads), so the
+    # first rows can be NaN. Forward/back-fill numeric columns so metrics stay
+    # finite (otherwise jerk/smoothness/score come out NaN).
+    df = df.copy()
+    num_cols = df.select_dtypes(include=[np.number]).columns
+    if len(num_cols):
+        df[num_cols] = df[num_cols].ffill().bfill().fillna(0.0)
+
     t = df["timestamp"].to_numpy(dtype=np.float64) if "timestamp" in df.columns else np.arange(n) / 125.0
     duration = float(t[-1] - t[0]) if n > 1 else 0.0
 

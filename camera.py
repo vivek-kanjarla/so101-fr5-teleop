@@ -57,6 +57,32 @@ class RealSenseCamera:
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
     def start(self):
+        self._open_pipeline()
+
+        # Warm up — let auto-exposure settle before starting the capture thread.
+        for _ in range(5):
+            try:
+                self._pipeline.wait_for_frames(timeout_ms=1000)
+            except Exception:
+                pass
+
+        ci = self._intrinsics
+        depth_info = (f"  +depth(scale={self._depth_scale:.6f} m/unit, aligned→color)"
+                      if self._enable_depth else "")
+        print(
+            f"[CAMERA:{self.name}] {'serial ' + self._serial + ' ' if self._serial else ''}"
+            f"ready — {self._width}×{self._height} @ {self._fps} fps  "
+            f"fx={ci['fx']:.1f} fy={ci['fy']:.1f} cx={ci['cx']:.1f} cy={ci['cy']:.1f}{depth_info}"
+        )
+
+        self._stop_evt.clear()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _open_pipeline(self) -> None:
+        """(Re)create and start the pipeline; set intrinsics / align / depth scale /
+        global-time. Used by start() and by the capture thread to self-heal after a
+        device error, so a transient USB hiccup does not end the recording."""
         import pyrealsense2 as rs
 
         cfg = rs.config()
@@ -69,8 +95,7 @@ class RealSenseCamera:
         self._pipeline = rs.pipeline()
         profile = self._pipeline.start(cfg)
 
-        # Enable global-time so per-frame hardware timestamps are reported on the
-        # host epoch (comparable to time.time() used by the joint log).
+        # Global-time → per-frame hardware timestamps on the host epoch.
         if self._use_hw_ts:
             try:
                 for s in profile.get_device().query_sensors():
@@ -81,43 +106,36 @@ class RealSenseCamera:
                 self._use_hw_ts = False
 
         ci = profile.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
-        # Save distortion model name alongside coefficients — the RealSense color
-        # stream uses inverse-Brown-Conrady, which differs from OpenCV's default
-        # Brown-Conrady. Knowing the model prevents wrong undistortion later.
+        # inverse-Brown-Conrady distortion model name saved for correct undistortion.
         self._intrinsics = {
-            "width":            ci.width,
-            "height":           ci.height,
-            "fx":               ci.fx,
-            "fy":               ci.fy,
-            "cx":               ci.ppx,
-            "cy":               ci.ppy,
+            "width": ci.width, "height": ci.height,
+            "fx": ci.fx, "fy": ci.fy, "cx": ci.ppx, "cy": ci.ppy,
             "distortion_model": str(ci.model).split(".")[-1],
-            "dist_coeffs":      list(ci.coeffs),
+            "dist_coeffs": list(ci.coeffs),
         }
-
-        depth_info = ""
         if self._enable_depth:
-            # Align depth → color so the two streams are pixel-registered.
-            self._align       = rs.align(rs.stream.color)
+            self._align       = rs.align(rs.stream.color)   # align depth → color
             self._depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
-            depth_info = f"  +depth(scale={self._depth_scale:.6f} m/unit, aligned→color)"
 
-        # Warm up — let auto-exposure settle before starting the capture thread.
-        for _ in range(5):
-            try:
-                self._pipeline.wait_for_frames(timeout_ms=1000)
-            except Exception:
-                pass
-
-        print(
-            f"[CAMERA:{self.name}] {'serial ' + self._serial + ' ' if self._serial else ''}"
-            f"ready — {self._width}×{self._height} @ {self._fps} fps  "
-            f"fx={ci.fx:.1f} fy={ci.fy:.1f} cx={ci.ppx:.1f} cy={ci.ppy:.1f}{depth_info}"
-        )
-
-        self._stop_evt.clear()
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
+    def _reopen(self) -> bool:
+        """Stop and restart the pipeline after a device error. Returns success."""
+        try:
+            if self._pipeline:
+                try:
+                    self._pipeline.stop()
+                except Exception:
+                    pass
+            time.sleep(0.3)
+            self._open_pipeline()
+            for _ in range(3):                       # re-warm
+                try:
+                    self._pipeline.wait_for_frames(timeout_ms=1000)
+                except Exception:
+                    pass
+            return True
+        except Exception as exc:
+            print(f"[CAMERA:{self.name}] reopen failed: {exc}")
+            return False
 
     def stop(self):
         self._stop_evt.set()
@@ -168,9 +186,14 @@ class RealSenseCamera:
         logged_ts_source = False
 
         consecutive_errors = 0
+        restarts = 0
+        MAX_RESTARTS = 8          # cap so a truly unplugged camera eventually stops
+        RESTART_EVERY = 15        # consecutive errors before attempting a restart
         while not self._stop_evt.is_set():
             try:
-                framesets = self._pipeline.wait_for_frames(timeout_ms=1000)
+                # Generous timeout: tolerate transient USB stalls without counting
+                # a frame as lost (a real 30 fps frame arrives in ~33 ms).
+                framesets = self._pipeline.wait_for_frames(timeout_ms=2000)
                 if self._align is not None:
                     framesets = self._align.process(framesets)
 
@@ -209,17 +232,29 @@ class RealSenseCamera:
             except Exception as exc:
                 if self._stop_evt.is_set():
                     break
-                exc_str = str(exc)
-                # Pipeline was stopped externally (USB drop, cleanup race) — exit
-                # the thread rather than spinning millions of times per second.
-                if "before start" in exc_str or self._pipeline is None:
-                    print(f"[CAMERA:{self.name}] Pipeline stopped unexpectedly — capture thread exiting.")
-                    break
                 consecutive_errors += 1
-                # Print at first error then every 30th to avoid flooding the console
-                # during sustained USB issues (which usually mean the camera dropped).
-                if consecutive_errors == 1 or consecutive_errors % 30 == 0:
-                    print(f"[CAMERA:{self.name}] Frame error #{consecutive_errors}: {exc}")
+                if consecutive_errors == 1 or consecutive_errors % RESTART_EVERY == 0:
+                    print(f"[CAMERA:{self.name}] frame error #{consecutive_errors}: {exc}")
+
+                # Self-heal: a burst of consecutive errors means the device dropped
+                # (USB stall/reset). Restart the pipeline instead of giving up, so a
+                # transient hiccup does not silently truncate the rest of the episode.
+                if consecutive_errors % RESTART_EVERY == 0:
+                    if restarts < MAX_RESTARTS:
+                        restarts += 1
+                        print(f"[CAMERA:{self.name}] restarting pipeline "
+                              f"(attempt {restarts}/{MAX_RESTARTS})...")
+                        if self._reopen():
+                            consecutive_errors = 0
+                            print(f"[CAMERA:{self.name}] pipeline recovered")
+                        else:
+                            time.sleep(0.5)
+                    else:
+                        print(f"[CAMERA:{self.name}] gave up after {MAX_RESTARTS} restarts "
+                              "— capture thread exiting.")
+                        break
+                else:
+                    time.sleep(0.005)
 
     def __enter__(self):
         self.start()
