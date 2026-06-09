@@ -96,6 +96,47 @@ class FR5Controller:
         if err not in (0, None):
             raise IOError(f"ServoJ failed with error {err}")
 
+    def inverse_kin(self, desc_pos: list[float]) -> list[float]:
+        """Inverse kinematics: TCP pose -> joint angles (deg).
+
+        desc_pos = [x_mm, y_mm, z_mm, rx_deg, ry_deg, rz_deg] (the same space as
+        get_eef_pose()). Solved with config=-1 so the Fairino solver seeds from the
+        current joint configuration — successive solves stay continuous (no elbow
+        flips between ticks). Used by the delta-EEF deploy path:
+            target_eef = get_eef_pose() + predicted_delta  ->  inverse_kin  ->  servo_j
+
+        Raises IOError if the target is unreachable / singular (caller should hold
+        the previous joint command on failure rather than crash the control loop).
+        """
+        desc_pos = [float(v) for v in desc_pos]
+        with self._rpc_lock:
+            raw = self._robot.GetInverseKin(0, desc_pos, -1)   # type=0 absolute pose
+        # Fairino getters return [err, value]; some firmware returns a bare err on failure.
+        if isinstance(raw, (list, tuple)) and len(raw) == 2:
+            err, joints = raw
+        else:
+            err, joints = raw, None
+        if err != 0 or joints is None:
+            raise IOError(f"GetInverseKin failed (err={err}) for pose {desc_pos}")
+        return list(joints)
+
+    def servo_cart(self, desc_pos: list[float], mode: int = 0):
+        """Cartesian servo straight to a TCP pose (alternative to inverse_kin + servo_j).
+
+        desc_pos = [x_mm, y_mm, z_mm, rx_deg, ry_deg, rz_deg].
+        mode = 0 absolute target, mode = 1 incremental (a delta) — so a delta-EEF
+        policy can drive the arm with mode=1 and skip the explicit IK step.
+        Prefer inverse_kin + servo_j if you want to detect unreachable targets
+        before commanding motion.
+        """
+        desc_pos = [float(v) for v in desc_pos]
+        with self._rpc_lock:
+            err = self._robot.ServoCart(
+                mode, desc_pos, [1.0] * 6, 0.0, 0.0, 0.008, 0.0, 0.0
+            )
+        if err not in (0, None):
+            raise IOError(f"ServoCart failed with error {err}")
+
     def activate_gripper(self, index: int) -> int:
         with self._rpc_lock:
             return self._robot.ActGripper(index, 1)
